@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 
 SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface) {
     SwapChainSupportDetails details;
@@ -103,6 +104,11 @@ void Swapchain::createSwapChain(VulkanContext& context, Window& window) {
     VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
     VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
     VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities, window);
+
+    // ќкно могло быть свЄрнуто во врем€ запроса Ч не создаЄм swapchain с нулевым размером.
+    if (extent.width == 0 || extent.height == 0) {
+        throw std::runtime_error("swapchain extent is zero (window minimized?)");
+    }
 
     uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
     if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
