@@ -13,7 +13,10 @@ public:
     VulkanContext(const VulkanContext&) = delete;
     VulkanContext& operator=(const VulkanContext&) = delete;
 
+    // Порядок: instance -> surface -> physical device -> logical device -> allocator
     void init(Window& window);
+
+    // Порядок уничтожения: allocator -> device -> surface -> instance
     void cleanup();
 
     VkInstance getInstance() const { return m_instance; }
@@ -27,8 +30,12 @@ public:
     QueueFamilyIndices findQueueFamilies() const { return findQueueFamilies(m_physicalDevice); }
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
 
-    // Одноразовая команда копирования буферов
+    // Одноразовые команды для работы с ресурсами
     void copyBuffer(VkCommandPool commandPool, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+
+    // Хелперы для работы с изображениями (текстурами)
+    void transitionImageLayout(VkCommandPool commandPool, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout);
+    void copyBufferToImage(VkCommandPool commandPool, VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 
 private:
     void createInstance();

@@ -4,7 +4,7 @@
 #include "Camera.h"
 #include "Mesh.h"
 #include "Swapchain.h"
-#include "Vertex.h"
+#include "Texture.h"
 #include "VulkanContext.h"
 #include "VulkanUtils.h"
 #include "Window.h"
@@ -64,6 +64,12 @@ private:
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkFence> m_inFlightFences;
 
+    // Ресурсы для текстуры и дескрипторов
+    Texture m_texture;
+    VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_descriptorSet = VK_NULL_HANDLE;
+
     Mesh m_idolMesh;
     Mesh m_cubeMesh;
 
@@ -85,13 +91,17 @@ private:
         createCommandPool();
         createDepthResources();
 
-        // Загрузка моделей
         m_cubeMesh.createProceduralCube(m_context, m_commandPool);
         m_idolMesh.loadFromObj(m_context, m_commandPool, "models/idol.obj");
 
+        createDescriptorSetLayout();
+        createTexture();
         createGraphicsPipeline();
         createCommandBuffers();
         createSyncObjects();
+
+        createDescriptorPool();
+        createDescriptorSet();
     }
 
     void createDepthResources() {
@@ -130,6 +140,66 @@ private:
         viewInfo.subresourceRange.layerCount = 1;
 
         VK_CHECK(vkCreateImageView(m_context.getDevice(), &viewInfo, nullptr, &m_depthImageView));
+    }
+
+    void createDescriptorSetLayout() {
+        VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+        samplerLayoutBinding.binding = 0;
+        samplerLayoutBinding.descriptorCount = 1;
+        samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerLayoutBinding.pImmutableSamplers = nullptr;
+        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &samplerLayoutBinding;
+
+        VK_CHECK(vkCreateDescriptorSetLayout(m_context.getDevice(), &layoutInfo, nullptr, &m_descriptorSetLayout));
+    }
+
+    void createTexture() {
+        m_texture.init(m_context, m_commandPool, "textures/stone.png");
+    }
+
+    void createDescriptorPool() {
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        poolSize.descriptorCount = 1;
+
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = 1;
+
+        VK_CHECK(vkCreateDescriptorPool(m_context.getDevice(), &poolInfo, nullptr, &m_descriptorPool));
+    }
+
+    void createDescriptorSet() {
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = m_descriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = &m_descriptorSetLayout;
+
+        VK_CHECK(vkAllocateDescriptorSets(m_context.getDevice(), &allocInfo, &m_descriptorSet));
+
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = m_texture.getImageView();
+        imageInfo.sampler = m_texture.getSampler();
+
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = m_descriptorSet;
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pImageInfo = &imageInfo;
+
+        vkUpdateDescriptorSets(m_context.getDevice(), 1, &descriptorWrite, 0, nullptr);
     }
 
     std::vector<char> readFile(const std::string& filename) {
@@ -240,6 +310,8 @@ private:
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1; // Привязываем дескрипторный сет
+        pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
         pipelineLayoutInfo.pushConstantRangeCount = 1;
         pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
@@ -380,6 +452,9 @@ private:
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
 
+        // Привязка дескрипторного сета с текстурой
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSet, 0, nullptr);
+
         VkViewport viewport{};
         viewport.width = static_cast<float>(extent.width);
         viewport.height = static_cast<float>(extent.height);
@@ -392,7 +467,7 @@ private:
 
         glm::mat4 view = m_camera.getViewMatrix();
         glm::mat4 proj = glm::perspective(glm::radians(45.0f), extent.width / (float)extent.height, 0.1f, 100.0f);
-        proj[1][1] *= -1; // Инверсия Y для Vulkan
+        proj[1][1] *= -1;
 
         for (const auto& obj : objects) {
             glm::mat4 model = glm::translate(glm::mat4(1.0f), obj.position);
@@ -487,9 +562,7 @@ private:
         vkAcquireNextImageKHR(device, m_swapchain.getHandle(), UINT64_MAX, m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
 
         std::vector<SceneObject> objects = {
-            // Центральная статуя (идол) - немного опущена вниз по Y
             {{0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, false, true},
-            // 4 колонны вокруг
             {{-3.0f, -1.0f, -3.0f}, {0.5f, 2.0f, 0.5f}, false, false},
             {{ 3.0f, -1.0f, -3.0f}, {0.5f, 2.0f, 0.5f}, false, false},
             {{-3.0f, -1.0f,  3.0f}, {0.5f, 2.0f, 0.5f}, false, false},
@@ -537,6 +610,18 @@ private:
 
             m_idolMesh.cleanup(m_context.getAllocator());
             m_cubeMesh.cleanup(m_context.getAllocator());
+
+            // Очистка текстур и дескрипторов
+            m_texture.cleanup(device, m_context.getAllocator());
+
+            if (m_descriptorPool != VK_NULL_HANDLE) {
+                vkDestroyDescriptorPool(device, m_descriptorPool, nullptr);
+                m_descriptorPool = VK_NULL_HANDLE;
+            }
+            if (m_descriptorSetLayout != VK_NULL_HANDLE) {
+                vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
+                m_descriptorSetLayout = VK_NULL_HANDLE;
+            }
 
             if (m_depthImageView != VK_NULL_HANDLE) {
                 vkDestroyImageView(device, m_depthImageView, nullptr);
