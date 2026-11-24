@@ -15,12 +15,12 @@ if not exist "%GLSLC%" (
     exit /b 1
 )
 
-echo Compiling vertex shader...
+echo Compiling triangle shaders...
 "%GLSLC%" shaders\triangle.vert -o shaders\triangle.vert.spv
-if errorlevel 1 exit /b 1
-
-echo Compiling fragment shader...
 "%GLSLC%" shaders\triangle.frag -o shaders\triangle.frag.spv
-if errorlevel 1 exit /b 1
+
+echo Compiling postprocess shaders...
+"%GLSLC%" shaders\postprocess.vert -o shaders\postprocess.vert.spv
+"%GLSLC%" shaders\postprocess.frag -o shaders\postprocess.frag.spv
 
 echo Shaders compiled successfully.
