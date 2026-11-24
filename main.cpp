@@ -2,6 +2,7 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 #include "Buffer.h"
+#include "Camera.h"
 #include "Swapchain.h"
 #include "Vertex.h"
 #include "VulkanContext.h"
@@ -26,10 +27,17 @@ struct PushConstants {
     glm::mat4 mvp;
 };
 
+// Структура для описания объекта на сцене
+struct SceneObject {
+    glm::vec3 position;
+    glm::vec3 scale;
+    bool isRotating;
+};
+
 class HelloTriangleApplication {
 public:
     void run() {
-        m_window.init(WIDTH, HEIGHT, "Vulkan 3D Cube");
+        m_window.init(WIDTH, HEIGHT, "Vulkan 3D Scene");
         try {
             initVulkan();
             mainLoop();
@@ -47,6 +55,7 @@ private:
     Window m_window;
     VulkanContext m_context;
     Swapchain m_swapchain;
+    Camera m_camera;
 
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
@@ -59,10 +68,15 @@ private:
     Buffer m_indexBuffer;
     uint32_t m_indexCount = 0;
 
-    // Ресурсы буфера глубины
     VkImage m_depthImage = VK_NULL_HANDLE;
     VmaAllocation m_depthAllocation = VK_NULL_HANDLE;
     VkImageView m_depthImageView = VK_NULL_HANDLE;
+
+    // Переменные для ввода
+    float m_lastFrameTime = 0.0f;
+    bool m_firstMouse = true;
+    double m_lastMouseX = 0.0;
+    double m_lastMouseY = 0.0;
 
     uint32_t m_currentFrame = 0;
 
@@ -118,34 +132,33 @@ private:
     }
 
     void createVertexBuffer() {
-        // 24 вершины для куба (по 4 на грань), чтобы задать разные цвета граням
         std::vector<Vertex> vertices = {
-            // Передняя грань (Красный)
+            // Передняя
             {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
             {{ 0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
             {{ 0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
             {{-0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
-            // Задняя грань (Зеленый)
+            // Задняя
             {{-0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
             {{-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
             {{ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
             {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-            // Верхняя грань (Синий)
+            // Верхняя
             {{-0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
             {{ 0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
             {{ 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
             {{-0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
-            // Нижняя грань (Желтый)
+            // Нижняя
             {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
             {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
             {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
             {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
-            // Правая грань (Голубой)
+            // Правая
             {{ 0.5f, -0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}},
             {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
             {{ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
             {{ 0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}},
-            // Левая грань (Пурпурный)
+            // Левая
             {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 1.0f}},
             {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
             {{-0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
@@ -157,7 +170,6 @@ private:
     }
 
     void createIndexBuffer() {
-        // Индексы исправлены для правильного обхода всех граней
         std::vector<uint32_t> indices = {
             0, 1, 2, 2, 3, 0,       // Передняя
             4, 7, 6, 6, 5, 4,       // Задняя
@@ -240,7 +252,6 @@ private:
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
-        // Отключаем отсечение, чтобы избежать проблем с инверсией Y
         rasterizer.cullMode = VK_CULL_MODE_NONE;
         rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
@@ -379,7 +390,7 @@ private:
         vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const PushConstants& pc) {
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const std::vector<SceneObject>& objects, float time) {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -436,9 +447,23 @@ private:
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
         vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.getBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
-        vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+        glm::mat4 view = m_camera.getViewMatrix();
+        glm::mat4 proj = glm::perspective(glm::radians(45.0f), extent.width / (float)extent.height, 0.1f, 100.0f);
+        proj[1][1] *= -1; // Инверсия Y для Vulkan
 
-        vkCmdDrawIndexed(commandBuffer, m_indexCount, 1, 0, 0, 0);
+        for (const auto& obj : objects) {
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), obj.position);
+            model = glm::scale(model, obj.scale);
+            if (obj.isRotating) {
+                model = glm::rotate(model, time * glm::radians(45.0f), glm::vec3(1.0f, 1.0f, 0.0f));
+            }
+
+            PushConstants pc{};
+            pc.mvp = proj * view * model;
+
+            vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdDrawIndexed(commandBuffer, m_indexCount, 1, 0, 0, 0);
+        }
 
         vkCmdEndRendering(commandBuffer);
 
@@ -469,12 +494,40 @@ private:
     void mainLoop() {
         while (!m_window.shouldClose()) {
             m_window.pollEvents();
-            drawFrame();
+
+            float currentFrame = static_cast<float>(glfwGetTime());
+            float deltaTime = currentFrame - m_lastFrameTime;
+            m_lastFrameTime = currentFrame;
+
+            GLFWwindow* window = m_window.getNativeWindow();
+
+            // Захват мыши только по нажатию правой кнопки
+            if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                if (m_firstMouse) {
+                    glfwGetCursorPos(window, &m_lastMouseX, &m_lastMouseY);
+                    m_firstMouse = false;
+                }
+                double xpos, ypos;
+                glfwGetCursorPos(window, &xpos, &ypos);
+                float xoffset = static_cast<float>(xpos - m_lastMouseX);
+                float yoffset = static_cast<float>(m_lastMouseY - ypos); // Инверсия Y
+                m_lastMouseX = xpos;
+                m_lastMouseY = ypos;
+                m_camera.processMouseMovement(xoffset, yoffset);
+            }
+            else {
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                m_firstMouse = true;
+            }
+
+            m_camera.processKeyboard(window, deltaTime);
+            drawFrame(deltaTime);
         }
         vkDeviceWaitIdle(m_context.getDevice());
     }
 
-    void drawFrame() {
+    void drawFrame(float deltaTime) {
         VkDevice device = m_context.getDevice();
 
         VK_CHECK(vkWaitForFences(device, 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX));
@@ -483,21 +536,17 @@ private:
         uint32_t imageIndex = 0;
         vkAcquireNextImageKHR(device, m_swapchain.getHandle(), UINT64_MAX, m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
 
-        // Вычисляем матрицу MVP
-        static auto startTime = std::chrono::high_resolution_clock::now();
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
-        glm::mat4 model = glm::rotate(glm::mat4(1.0f), time * glm::radians(45.0f), glm::vec3(1.0f, 1.0f, 0.0f));
-        glm::mat4 view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 proj = glm::perspective(glm::radians(45.0f), m_swapchain.getExtent().width / (float)m_swapchain.getExtent().height, 0.1f, 10.0f);
-        proj[1][1] *= -1; // Инверсия Y для Vulkan
-
-        PushConstants pc{};
-        pc.mvp = proj * view * model;
+        // Сцена: центральный вращающийся куб + 4 колонны
+        std::vector<SceneObject> objects = {
+            {{0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, true},
+            {{-2.0f, 0.0f, -2.0f}, {0.5f, 1.5f, 0.5f}, false},
+            {{ 2.0f, 0.0f, -2.0f}, {0.5f, 1.5f, 0.5f}, false},
+            {{-2.0f, 0.0f,  2.0f}, {0.5f, 1.5f, 0.5f}, false},
+            {{ 2.0f, 0.0f,  2.0f}, {0.5f, 1.5f, 0.5f}, false}
+        };
 
         VK_CHECK(vkResetCommandBuffer(m_commandBuffers[m_currentFrame], 0));
-        recordCommandBuffer(m_commandBuffers[m_currentFrame], imageIndex, pc);
+        recordCommandBuffer(m_commandBuffers[m_currentFrame], imageIndex, objects, m_lastFrameTime);
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -535,7 +584,6 @@ private:
         if (device != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(device);
 
-            // Уничтожение глубины
             if (m_depthImageView != VK_NULL_HANDLE) {
                 vkDestroyImageView(device, m_depthImageView, nullptr);
                 m_depthImageView = VK_NULL_HANDLE;
