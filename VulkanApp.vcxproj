@@ -145,6 +145,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Application.cpp" />
     <ClCompile Include="Buffer.cpp" />
     <ClCompile Include="Camera.cpp" />
     <ClCompile Include="Dependencies\imgui\imgui.cpp" />
@@ -154,9 +155,11 @@
     <ClCompile Include="Dependencies\imgui\imgui_impl_vulkan.cpp" />
     <ClCompile Include="Dependencies\imgui\imgui_tables.cpp" />
     <ClCompile Include="Dependencies\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="EditorUI.cpp" />
     <ClCompile Include="Gamepad.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Mesh.cpp" />
+    <ClCompile Include="OffscreenRenderer.cpp" />
     <ClCompile Include="Swapchain.cpp" />
     <ClCompile Include="Texture.cpp" />
     <ClCompile Include="VmaUsage.cpp" />
@@ -172,6 +175,7 @@
     <None Include="shaders\triangle.vert" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Application.h" />
     <ClInclude Include="Buffer.h" />
     <ClInclude Include="Camera.h" />
     <ClInclude Include="Dependencies\imgui\imconfig.h" />
@@ -182,8 +186,11 @@
     <ClInclude Include="Dependencies\imgui\imstb_rectpack.h" />
     <ClInclude Include="Dependencies\imgui\imstb_textedit.h" />
     <ClInclude Include="Dependencies\imgui\imstb_truetype.h" />
+    <ClInclude Include="EditorUI.h" />
     <ClInclude Include="Gamepad.h" />
     <ClInclude Include="Mesh.h" />
+    <ClInclude Include="OffscreenRenderer.h" />
+    <ClInclude Include="RenderTypes.h" />
     <ClInclude Include="Swapchain.h" />
     <ClInclude Include="Texture.h" />
     <ClInclude Include="Vertex.h" />
