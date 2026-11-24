@@ -46,6 +46,28 @@ void Camera::processMouseMovement(float xOffset, float yOffset) {
     updateCameraVectors();
 }
 
+void Camera::processGamepad(const glm::vec2& leftStick, const glm::vec2& rightStick, float leftTrigger, float rightTrigger, float deltaTime) {
+    float velocity = m_speed * deltaTime;
+
+    // Движение (левый стик)
+    m_position += m_front * (leftStick.y * velocity);
+    m_position += m_right * (leftStick.x * velocity);
+
+    // Подъем/спуск (курки)
+    m_position += m_worldUp * ((rightTrigger - leftTrigger) * velocity);
+
+    // Вращение (правый стик)
+    float rotSpeed = 120.0f * deltaTime;
+    m_yaw += rightStick.x * rotSpeed;
+    m_pitch += rightStick.y * rotSpeed;
+
+    // Ограничиваем угол обзора
+    if (m_pitch > 89.0f) m_pitch = 89.0f;
+    if (m_pitch < -89.0f) m_pitch = -89.0f;
+
+    updateCameraVectors();
+}
+
 void Camera::updateCameraVectors() {
     glm::vec3 front;
     front.x = cos(glm::radians(m_yaw)) * cos(glm::radians(m_pitch));

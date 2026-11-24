@@ -13,6 +13,9 @@ public:
     void processKeyboard(GLFWwindow* window, float deltaTime);
     void processMouseMovement(float xOffset, float yOffset);
 
+    // Новый метод для обработки ввода с геймпада
+    void processGamepad(const glm::vec2& leftStick, const glm::vec2& rightStick, float leftTrigger, float rightTrigger, float deltaTime);
+
     glm::vec3 getPosition() const { return m_position; }
 
 private:

@@ -2,6 +2,7 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 #include "Camera.h"
+#include "Gamepad.h"
 #include "Mesh.h"
 #include "Swapchain.h"
 #include "Texture.h"
@@ -74,6 +75,7 @@ private:
     VulkanContext m_context;
     Swapchain m_swapchain;
     Camera m_camera;
+    Gamepad m_gamepad;
 
     // Храним формат в классе, чтобы указатель на него оставался валидным
     VkFormat m_swapchainImageFormat = VK_FORMAT_UNDEFINED;
@@ -113,6 +115,7 @@ private:
     bool m_showGui = false;
     bool m_f1Pressed = false;
 
+    bool m_fogEnabled = true;
     float m_fogDensity = 0.035f;
     glm::vec3 m_fogColor = glm::vec3(0.58f, 0.62f, 0.65f);
     PostProcessParams m_ppParams;
@@ -127,7 +130,7 @@ private:
     void initVulkan() {
         m_context.init(m_window);
         m_swapchain.init(m_context, m_window);
-        m_swapchainImageFormat = m_swapchain.getImageFormat(); // Сохраняем формат
+        m_swapchainImageFormat = m_swapchain.getImageFormat();
 
         createCommandPool();
         createOffscreenResources();
@@ -152,10 +155,6 @@ private:
 
         initImGui();
     }
-
-    // ... (createOffscreenResources, createDepthResources, createDescriptorSetLayout, createTexture, 
-    // createDescriptorPool, createDescriptorSet, createPostProcessDescriptorSetLayout, 
-    // createPostProcessDescriptorPool, createPostProcessDescriptorSet остаются без изменений)
 
     void createOffscreenResources() {
         VkImageCreateInfo imageInfo{};
@@ -734,7 +733,7 @@ private:
             pc.mvp = proj * view * model;
             pc.modelView = view * model;
             pc.fogColor = m_fogColor;
-            pc.fogDensity = m_fogDensity;
+            pc.fogDensity = m_fogEnabled ? m_fogDensity : 0.0f; // Отключение тумана
 
             vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
 
@@ -858,15 +857,13 @@ private:
         init_info.MinImageCount = 2;
         init_info.ImageCount = static_cast<uint32_t>(m_swapchain.getImages().size());
 
-        // Обязательно включаем Dynamic Rendering для ImGui
         init_info.UseDynamicRendering = true;
 
         VkPipelineRenderingCreateInfo pipelineRenderingInfo{};
         pipelineRenderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
         pipelineRenderingInfo.colorAttachmentCount = 1;
-        pipelineRenderingInfo.pColorAttachmentFormats = &m_swapchainImageFormat; // Безопасный указатель
+        pipelineRenderingInfo.pColorAttachmentFormats = &m_swapchainImageFormat;
 
-        // В новых версиях ImGui поля конфигурации пайплайна перенесены в PipelineInfoMain
         init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
         init_info.PipelineInfoMain.RenderPass = VK_NULL_HANDLE;
         init_info.PipelineInfoMain.Subpass = 0;
@@ -895,6 +892,9 @@ private:
                 m_f1Pressed = false;
             }
 
+            // Опрос геймпада
+            m_gamepad.update();
+
             if (m_showGui) {
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
             }
@@ -917,18 +917,35 @@ private:
                     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
                     m_firstMouse = true;
                 }
-                m_camera.processKeyboard(window, deltaTime);
             }
+
+            // Камера обрабатывает ввод с клавиатуры всегда, а с геймпада - параллельно
+            m_camera.processKeyboard(window, deltaTime);
+            m_camera.processGamepad(
+                m_gamepad.getLeftStick(),
+                m_gamepad.getRightStick(),
+                m_gamepad.getLeftTrigger(),
+                m_gamepad.getRightTrigger(),
+                deltaTime
+            );
 
             ImGui_ImplVulkan_NewFrame();
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
 
             if (m_showGui) {
+                // Фиксируем позицию окна в левом верхнем углу при первом запуске
+                ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
                 ImGui::Begin("PS2 Atmosphere & Post-FX", &m_showGui);
                 ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+                ImGui::Text("Gamepad: %s", m_gamepad.isConnected() ? "Connected" : "Disconnected");
+                ImGui::Separator();
+
+                ImGui::Checkbox("Enable Fog", &m_fogEnabled);
                 ImGui::SliderFloat("Fog Density", &m_fogDensity, 0.0f, 0.1f);
                 ImGui::ColorEdit3("Fog Color", glm::value_ptr(m_fogColor));
+
+                ImGui::Separator();
                 ImGui::SliderFloat("Bloom Threshold", &m_ppParams.bloomThreshold, 0.0f, 1.0f);
                 ImGui::SliderFloat("Bloom Intensity", &m_ppParams.bloomIntensity, 0.0f, 2.0f);
                 ImGui::SliderFloat("Saturation", &m_ppParams.saturation, 0.0f, 1.5f);

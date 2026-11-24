@@ -63,6 +63,9 @@
     <ClCompile Include="Dependencies\imgui\imgui_widgets.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+    <ClCompile Include="Gamepad.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md">
@@ -135,6 +138,9 @@
     </ClInclude>
     <ClInclude Include="Dependencies\imgui\imstb_truetype.h">
       <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="Gamepad.h">
+      <Filter>Исходные файлы</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
