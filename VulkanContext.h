@@ -27,6 +27,9 @@ public:
     QueueFamilyIndices findQueueFamilies() const { return findQueueFamilies(m_physicalDevice); }
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
 
+    // Одноразовая команда копирования буферов
+    void copyBuffer(VkCommandPool commandPool, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+
 private:
     void createInstance();
     void pickPhysicalDevice();
@@ -42,5 +45,5 @@ private:
     VkDevice m_device = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VkQueue m_presentQueue = VK_NULL_HANDLE;
-    VmaAllocator m_allocator = VK_NULL_HANDLE; // VMA использует VK_NULL_HANDLE (nullptr) для пустых указателей
+    VmaAllocator m_allocator = VK_NULL_HANDLE;
 };

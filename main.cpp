@@ -1,14 +1,17 @@
-// Обязательные макросы GLM должны быть объявлены до включения заголовка
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
+#include "Buffer.h"
 #include "Swapchain.h"
+#include "Vertex.h"
 #include "VulkanContext.h"
 #include "VulkanUtils.h"
 #include "Window.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -19,10 +22,14 @@
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
+struct PushConstants {
+    glm::mat4 mvp;
+};
+
 class HelloTriangleApplication {
 public:
     void run() {
-        m_window.init(WIDTH, HEIGHT, "Vulkan Triangle");
+        m_window.init(WIDTH, HEIGHT, "Vulkan 3D Cube");
         try {
             initVulkan();
             mainLoop();
@@ -48,41 +55,126 @@ private:
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkFence> m_inFlightFences;
 
-    // Тестовый буфер VMA
-    VkBuffer m_testBuffer = VK_NULL_HANDLE;
-    VmaAllocation m_testAllocation = VK_NULL_HANDLE;
+    Buffer m_vertexBuffer;
+    Buffer m_indexBuffer;
+    uint32_t m_indexCount = 0;
+
+    // Ресурсы буфера глубины
+    VkImage m_depthImage = VK_NULL_HANDLE;
+    VmaAllocation m_depthAllocation = VK_NULL_HANDLE;
+    VkImageView m_depthImageView = VK_NULL_HANDLE;
 
     uint32_t m_currentFrame = 0;
 
     void initVulkan() {
         m_context.init(m_window);
         m_swapchain.init(m_context, m_window);
-        createTestBuffer();
-        createGraphicsPipeline();
+
         createCommandPool();
+        createDepthResources();
+        createVertexBuffer();
+        createIndexBuffer();
+        createGraphicsPipeline();
         createCommandBuffers();
         createSyncObjects();
     }
 
-    void createTestBuffer() {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = 1024;
-        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    void createDepthResources() {
+        VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+        VkExtent2D extent = m_swapchain.getExtent();
+
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.extent.width = extent.width;
+        imageInfo.extent.height = extent.height;
+        imageInfo.extent.depth = 1;
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.format = depthFormat;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-        VK_CHECK(vmaCreateBuffer(m_context.getAllocator(), &bufferInfo, &allocInfo,
-            &m_testBuffer, &m_testAllocation, nullptr));
+        VK_CHECK(vmaCreateImage(m_context.getAllocator(), &imageInfo, &allocInfo, &m_depthImage, &m_depthAllocation, nullptr));
+
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = m_depthImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = depthFormat;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+
+        VK_CHECK(vkCreateImageView(m_context.getDevice(), &viewInfo, nullptr, &m_depthImageView));
+    }
+
+    void createVertexBuffer() {
+        // 24 вершины для куба (по 4 на грань), чтобы задать разные цвета граням
+        std::vector<Vertex> vertices = {
+            // Передняя грань (Красный)
+            {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
+            {{ 0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
+            {{ 0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
+            {{-0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
+            // Задняя грань (Зеленый)
+            {{-0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+            {{-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+            {{ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+            {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+            // Верхняя грань (Синий)
+            {{-0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
+            {{ 0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
+            {{ 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
+            {{-0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
+            // Нижняя грань (Желтый)
+            {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
+            {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
+            {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
+            {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
+            // Правая грань (Голубой)
+            {{ 0.5f, -0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}},
+            {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
+            {{ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
+            {{ 0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}},
+            // Левая грань (Пурпурный)
+            {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 1.0f}},
+            {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
+            {{-0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
+            {{-0.5f,  0.5f, -0.5f}, {1.0f, 0.0f, 1.0f}}
+        };
+
+        VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+        m_vertexBuffer.createDeviceLocal(m_context, m_commandPool, vertices.data(), bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    }
+
+    void createIndexBuffer() {
+        // Индексы исправлены для правильного обхода всех граней
+        std::vector<uint32_t> indices = {
+            0, 1, 2, 2, 3, 0,       // Передняя
+            4, 7, 6, 6, 5, 4,       // Задняя
+            8, 11, 10, 10, 9, 8,    // Верхняя
+            12, 13, 14, 14, 15, 12, // Нижняя
+            16, 19, 18, 18, 17, 16, // Правая
+            20, 23, 22, 22, 21, 20  // Левая
+        };
+        m_indexCount = static_cast<uint32_t>(indices.size());
+
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+        m_indexBuffer.createDeviceLocal(m_context, m_commandPool, indices.data(), bufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     }
 
     std::vector<char> readFile(const std::string& filename) {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
-        if (!file.is_open()) {
-            throw std::runtime_error("failed to open file: " + filename);
-        }
+        if (!file.is_open()) throw std::runtime_error("failed to open file: " + filename);
         size_t fileSize = (size_t)file.tellg();
         std::vector<char> buffer(fileSize);
         file.seekg(0);
@@ -125,15 +217,19 @@ private:
 
         VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
+        auto bindingDescription = Vertex::getBindingDescription();
+        auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
         vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInputInfo.vertexBindingDescriptionCount = 0;
-        vertexInputInfo.vertexAttributeDescriptionCount = 0;
+        vertexInputInfo.vertexBindingDescriptionCount = 1;
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+        vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        inputAssembly.primitiveRestartEnable = VK_FALSE;
 
         VkPipelineViewportStateCreateInfo viewportState{};
         viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -142,18 +238,23 @@ private:
 
         VkPipelineRasterizationStateCreateInfo rasterizer{};
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-        rasterizer.depthClampEnable = VK_FALSE;
-        rasterizer.rasterizerDiscardEnable = VK_FALSE;
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
-        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+        // Отключаем отсечение, чтобы избежать проблем с инверсией Y
+        rasterizer.cullMode = VK_CULL_MODE_NONE;
         rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-        rasterizer.depthBiasEnable = VK_FALSE;
 
         VkPipelineMultisampleStateCreateInfo multisampling{};
         multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisampling.sampleShadingEnable = VK_FALSE;
         multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_TRUE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+        depthStencil.depthBoundsTestEnable = VK_FALSE;
+        depthStencil.stencilTestEnable = VK_FALSE;
 
         VkPipelineColorBlendAttachmentState colorBlendAttachment{};
         colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -161,14 +262,8 @@ private:
 
         VkPipelineColorBlendStateCreateInfo colorBlending{};
         colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        colorBlending.logicOpEnable = VK_FALSE;
-        colorBlending.logicOp = VK_LOGIC_OP_COPY;
         colorBlending.attachmentCount = 1;
         colorBlending.pAttachments = &colorBlendAttachment;
-        colorBlending.blendConstants[0] = 0.0f;
-        colorBlending.blendConstants[1] = 0.0f;
-        colorBlending.blendConstants[2] = 0.0f;
-        colorBlending.blendConstants[3] = 0.0f;
 
         std::vector<VkDynamicState> dynamicStates = {
             VK_DYNAMIC_STATE_VIEWPORT,
@@ -179,10 +274,15 @@ private:
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(PushConstants);
+
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.setLayoutCount = 0;
-        pipelineLayoutInfo.pushConstantRangeCount = 0;
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
         VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout));
 
@@ -191,6 +291,7 @@ private:
         pipelineRenderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
         pipelineRenderingInfo.colorAttachmentCount = 1;
         pipelineRenderingInfo.pColorAttachmentFormats = &swapchainFormat;
+        pipelineRenderingInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
 
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -202,12 +303,11 @@ private:
         pipelineInfo.pViewportState = &viewportState;
         pipelineInfo.pRasterizationState = &rasterizer;
         pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = &depthStencil;
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pDynamicState = &dynamicState;
         pipelineInfo.layout = m_pipelineLayout;
         pipelineInfo.renderPass = VK_NULL_HANDLE;
-        pipelineInfo.subpass = 0;
-        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
         VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline));
 
@@ -228,7 +328,6 @@ private:
 
     void createCommandBuffers() {
         m_commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.commandPool = m_commandPool;
@@ -238,8 +337,7 @@ private:
         VK_CHECK(vkAllocateCommandBuffers(m_context.getDevice(), &allocInfo, m_commandBuffers.data()));
     }
 
-    void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
-        VkImageLayout oldLayout, VkImageLayout newLayout) {
+    void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspectMask) {
         VkImageMemoryBarrier barrier{};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.oldLayout = oldLayout;
@@ -247,7 +345,7 @@ private:
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = image;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.aspectMask = aspectMask;
         barrier.subresourceRange.baseMipLevel = 0;
         barrier.subresourceRange.levelCount = 1;
         barrier.subresourceRange.baseArrayLayer = 0;
@@ -262,6 +360,12 @@ private:
             srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
             dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         }
+        else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        }
         else if (oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
             barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
             barrier.dstAccessMask = 0;
@@ -272,13 +376,10 @@ private:
             throw std::runtime_error("unsupported image layout transition!");
         }
 
-        vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0,
-            0, nullptr,
-            0, nullptr,
-            1, &barrier);
+        vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const PushConstants& pc) {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -287,21 +388,26 @@ private:
         VkImage swapchainImage = m_swapchain.getImages()[imageIndex];
         VkExtent2D extent = m_swapchain.getExtent();
 
-        transitionImageLayout(commandBuffer, swapchainImage,
-            VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        transitionImageLayout(commandBuffer, swapchainImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+        transitionImageLayout(commandBuffer, m_depthImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-        // Визуальная проверка интеграции GLM: используем glm::vec3 для цвета очистки
         glm::vec3 bgColor(0.05f, 0.08f, 0.15f);
 
         VkRenderingAttachmentInfo colorAttachment{};
         colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         colorAttachment.imageView = m_swapchain.getImageViews()[imageIndex];
         colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        colorAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
         colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         colorAttachment.clearValue = { {{bgColor.r, bgColor.g, bgColor.b, 1.0f}} };
+
+        VkRenderingAttachmentInfo depthAttachment{};
+        depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        depthAttachment.imageView = m_depthImageView;
+        depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
 
         VkRenderingInfo renderingInfo{};
         renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -309,32 +415,34 @@ private:
         renderingInfo.layerCount = 1;
         renderingInfo.colorAttachmentCount = 1;
         renderingInfo.pColorAttachments = &colorAttachment;
+        renderingInfo.pDepthAttachment = &depthAttachment;
 
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
 
         VkViewport viewport{};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
         viewport.width = static_cast<float>(extent.width);
         viewport.height = static_cast<float>(extent.height);
-        viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
         VkRect2D scissor{};
-        scissor.offset = { 0, 0 };
         scissor.extent = extent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        VkBuffer vertexBuffers[] = { m_vertexBuffer.getBuffer() };
+        VkDeviceSize offsets[] = { 0 };
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.getBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+        vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+
+        vkCmdDrawIndexed(commandBuffer, m_indexCount, 1, 0, 0, 0);
 
         vkCmdEndRendering(commandBuffer);
 
-        transitionImageLayout(commandBuffer, swapchainImage,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        transitionImageLayout(commandBuffer, swapchainImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
 
         VK_CHECK(vkEndCommandBuffer(commandBuffer));
     }
@@ -373,11 +481,23 @@ private:
         VK_CHECK(vkResetFences(device, 1, &m_inFlightFences[m_currentFrame]));
 
         uint32_t imageIndex = 0;
-        vkAcquireNextImageKHR(device, m_swapchain.getHandle(), UINT64_MAX,
-            m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
+        vkAcquireNextImageKHR(device, m_swapchain.getHandle(), UINT64_MAX, m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+        // Вычисляем матрицу MVP
+        static auto startTime = std::chrono::high_resolution_clock::now();
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+        glm::mat4 model = glm::rotate(glm::mat4(1.0f), time * glm::radians(45.0f), glm::vec3(1.0f, 1.0f, 0.0f));
+        glm::mat4 view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 proj = glm::perspective(glm::radians(45.0f), m_swapchain.getExtent().width / (float)m_swapchain.getExtent().height, 0.1f, 10.0f);
+        proj[1][1] *= -1; // Инверсия Y для Vulkan
+
+        PushConstants pc{};
+        pc.mvp = proj * view * model;
 
         VK_CHECK(vkResetCommandBuffer(m_commandBuffers[m_currentFrame], 0));
-        recordCommandBuffer(m_commandBuffers[m_currentFrame], imageIndex);
+        recordCommandBuffer(m_commandBuffers[m_currentFrame], imageIndex, pc);
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -387,7 +507,6 @@ private:
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = waitSemaphores;
         submitInfo.pWaitDstStageMask = waitStages;
-
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &m_commandBuffers[m_currentFrame];
 
@@ -401,7 +520,6 @@ private:
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.waitSemaphoreCount = 1;
         presentInfo.pWaitSemaphores = signalSemaphores;
-
         VkSwapchainKHR swapChains[] = { m_swapchain.getHandle() };
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = swapChains;
@@ -417,12 +535,19 @@ private:
         if (device != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(device);
 
-            // Уничтожение тестового буфера VMA
-            if (m_testBuffer != VK_NULL_HANDLE) {
-                vmaDestroyBuffer(m_context.getAllocator(), m_testBuffer, m_testAllocation);
-                m_testBuffer = VK_NULL_HANDLE;
-                m_testAllocation = VK_NULL_HANDLE;
+            // Уничтожение глубины
+            if (m_depthImageView != VK_NULL_HANDLE) {
+                vkDestroyImageView(device, m_depthImageView, nullptr);
+                m_depthImageView = VK_NULL_HANDLE;
             }
+            if (m_depthImage != VK_NULL_HANDLE) {
+                vmaDestroyImage(m_context.getAllocator(), m_depthImage, m_depthAllocation);
+                m_depthImage = VK_NULL_HANDLE;
+                m_depthAllocation = VK_NULL_HANDLE;
+            }
+
+            m_vertexBuffer.cleanup(m_context.getAllocator());
+            m_indexBuffer.cleanup(m_context.getAllocator());
 
             for (VkSemaphore semaphore : m_imageAvailableSemaphores) {
                 vkDestroySemaphore(device, semaphore, nullptr);
@@ -445,7 +570,6 @@ private:
             m_swapchain.cleanup(device);
         }
 
-        // device -> surface -> instance
         m_context.cleanup();
         m_window.cleanup();
     }
@@ -453,7 +577,6 @@ private:
 
 int main() {
     HelloTriangleApplication app;
-
     try {
         app.run();
     }
@@ -461,6 +584,5 @@ int main() {
         std::cerr << e.what() << std::endl;
         return EXIT_FAILURE;
     }
-
     return EXIT_SUCCESS;
 }

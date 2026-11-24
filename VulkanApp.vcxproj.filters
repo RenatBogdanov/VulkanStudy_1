@@ -30,6 +30,9 @@
     <ClCompile Include="VmaUsage.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+    <ClCompile Include="Buffer.cpp">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md">
@@ -56,6 +59,12 @@
       <Filter>Исходные файлы</Filter>
     </ClInclude>
     <ClInclude Include="Swapchain.h">
+      <Filter>Исходные файлы</Filter>
+    </ClInclude>
+    <ClInclude Include="Vertex.h">
+      <Filter>Исходные файлы</Filter>
+    </ClInclude>
+    <ClInclude Include="Buffer.h">
       <Filter>Исходные файлы</Filter>
     </ClInclude>
   </ItemGroup>

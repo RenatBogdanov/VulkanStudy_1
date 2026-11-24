@@ -143,6 +143,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Buffer.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Swapchain.cpp" />
     <ClCompile Include="VmaUsage.cpp" />
@@ -156,7 +157,9 @@
     <None Include="shaders\triangle.vert" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Buffer.h" />
     <ClInclude Include="Swapchain.h" />
+    <ClInclude Include="Vertex.h" />
     <ClInclude Include="VulkanContext.h" />
     <ClInclude Include="VulkanUtils.h" />
     <ClInclude Include="Window.h" />
