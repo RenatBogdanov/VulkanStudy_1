@@ -24,3 +24,4 @@ echo Compiling postprocess shaders...
 "%GLSLC%" shaders\postprocess.frag -o shaders\postprocess.frag.spv
 
 echo Shaders compiled successfully.
+pause

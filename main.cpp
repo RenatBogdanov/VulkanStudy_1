@@ -9,8 +9,13 @@
 #include "VulkanUtils.h"
 #include "Window.h"
 
+#include <imgui/imgui.h>
+#include <imgui/imgui_impl_glfw.h>
+#include <imgui/imgui_impl_vulkan.h>
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include <chrono>
 #include <cstdlib>
@@ -23,13 +28,21 @@
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
-// Внутреннее разрешение PS2
 const uint32_t OFFSCREEN_WIDTH = 640;
 const uint32_t OFFSCREEN_HEIGHT = 448;
 
 struct PushConstants {
     glm::mat4 mvp;
-    glm::mat4 modelView; // Добавлено для тумана
+    glm::mat4 modelView;
+    glm::vec3 fogColor;
+    float fogDensity;
+};
+
+struct PostProcessParams {
+    float bloomThreshold = 0.65f;
+    float bloomIntensity = 0.85f;
+    float saturation = 0.80f;
+    float ditherStrength = 1.0f;
 };
 
 struct SceneObject {
@@ -62,31 +75,28 @@ private:
     Swapchain m_swapchain;
     Camera m_camera;
 
-    // Пайплайны
+    // Храним формат в классе, чтобы указатель на него оставался валидным
+    VkFormat m_swapchainImageFormat = VK_FORMAT_UNDEFINED;
+
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
-
     VkPipelineLayout m_postProcessPipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_postProcessPipeline = VK_NULL_HANDLE;
 
-    // Дескрипторы 3D-сцены
     Texture m_texture;
     VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet m_descriptorSet = VK_NULL_HANDLE;
 
-    // Дескрипторы пост-обработки
     VkDescriptorSetLayout m_postProcessDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_postProcessDescriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet m_postProcessDescriptorSet = VK_NULL_HANDLE;
 
-    // Ресурсы Offscreen-рендеринга
     VkImage m_offscreenImage = VK_NULL_HANDLE;
     VmaAllocation m_offscreenAllocation = VK_NULL_HANDLE;
     VkImageView m_offscreenImageView = VK_NULL_HANDLE;
     VkSampler m_offscreenSampler = VK_NULL_HANDLE;
 
-    // Ресурсы глубины (под разрешение 640x448)
     VkImage m_depthImage = VK_NULL_HANDLE;
     VmaAllocation m_depthAllocation = VK_NULL_HANDLE;
     VkImageView m_depthImageView = VK_NULL_HANDLE;
@@ -99,6 +109,14 @@ private:
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkFence> m_inFlightFences;
 
+    VkDescriptorPool m_imguiDescriptorPool = VK_NULL_HANDLE;
+    bool m_showGui = false;
+    bool m_f1Pressed = false;
+
+    float m_fogDensity = 0.035f;
+    glm::vec3 m_fogColor = glm::vec3(0.58f, 0.62f, 0.65f);
+    PostProcessParams m_ppParams;
+
     float m_lastFrameTime = 0.0f;
     bool m_firstMouse = true;
     double m_lastMouseX = 0.0;
@@ -109,6 +127,7 @@ private:
     void initVulkan() {
         m_context.init(m_window);
         m_swapchain.init(m_context, m_window);
+        m_swapchainImageFormat = m_swapchain.getImageFormat(); // Сохраняем формат
 
         createCommandPool();
         createOffscreenResources();
@@ -130,7 +149,13 @@ private:
         createPostProcessPipeline();
         createCommandBuffers();
         createSyncObjects();
+
+        initImGui();
     }
+
+    // ... (createOffscreenResources, createDepthResources, createDescriptorSetLayout, createTexture, 
+    // createDescriptorPool, createDescriptorSet, createPostProcessDescriptorSetLayout, 
+    // createPostProcessDescriptorPool, createPostProcessDescriptorSet остаются без изменений)
 
     void createOffscreenResources() {
         VkImageCreateInfo imageInfo{};
@@ -186,7 +211,6 @@ private:
 
     void createDepthResources() {
         VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
-
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -361,7 +385,6 @@ private:
 
     void createGraphicsPipeline() {
         VkDevice device = m_context.getDevice();
-
         std::vector<char> vertShaderSPV = readFile("shaders/triangle.vert.spv");
         std::vector<char> fragShaderSPV = readFile("shaders/triangle.frag.spv");
 
@@ -417,8 +440,6 @@ private:
         depthStencil.depthTestEnable = VK_TRUE;
         depthStencil.depthWriteEnable = VK_TRUE;
         depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-        depthStencil.depthBoundsTestEnable = VK_FALSE;
-        depthStencil.stencilTestEnable = VK_FALSE;
 
         VkPipelineColorBlendAttachmentState colorBlendAttachment{};
         colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -429,10 +450,7 @@ private:
         colorBlending.attachmentCount = 1;
         colorBlending.pAttachments = &colorBlendAttachment;
 
-        std::vector<VkDynamicState> dynamicStates = {
-            VK_DYNAMIC_STATE_VIEWPORT,
-            VK_DYNAMIC_STATE_SCISSOR
-        };
+        std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
         VkPipelineDynamicStateCreateInfo dynamicState{};
         dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
@@ -456,7 +474,7 @@ private:
         VkPipelineRenderingCreateInfo pipelineRenderingInfo{};
         pipelineRenderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
         pipelineRenderingInfo.colorAttachmentCount = 1;
-        pipelineRenderingInfo.pColorAttachmentFormats = &offscreenFormat; // Рендерим в offscreen
+        pipelineRenderingInfo.pColorAttachmentFormats = &offscreenFormat;
         pipelineRenderingInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
 
         VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -483,7 +501,6 @@ private:
 
     void createPostProcessPipeline() {
         VkDevice device = m_context.getDevice();
-
         std::vector<char> vertShaderSPV = readFile("shaders/postprocess.vert.spv");
         std::vector<char> fragShaderSPV = readFile("shaders/postprocess.frag.spv");
 
@@ -506,7 +523,6 @@ private:
 
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
         vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        // Нет вершинных буферов (генерируем в шейдере)
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -548,10 +564,17 @@ private:
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(PostProcessParams);
+
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &m_postProcessDescriptorSetLayout;
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
         VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &m_postProcessPipelineLayout));
 
@@ -586,12 +609,10 @@ private:
 
     void createCommandPool() {
         QueueFamilyIndices queueFamilyIndices = m_context.findQueueFamilies();
-
         VkCommandPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
-
         VK_CHECK(vkCreateCommandPool(m_context.getDevice(), &poolInfo, nullptr, &m_commandPool));
     }
 
@@ -602,7 +623,6 @@ private:
         allocInfo.commandPool = m_commandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = static_cast<uint32_t>(m_commandBuffers.size());
-
         VK_CHECK(vkAllocateCommandBuffers(m_context.getDevice(), &allocInfo, m_commandBuffers.data()));
     }
 
@@ -650,21 +670,16 @@ private:
         else {
             throw std::runtime_error("unsupported image layout transition!");
         }
-
         vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const std::vector<SceneObject>& objects, float time) {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
         VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
 
-        // --- ПРОХОД 1: 3D-Сцена в Offscreen (640x448) ---
         transitionImageLayout(commandBuffer, m_offscreenImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
         transitionImageLayout(commandBuffer, m_depthImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
-
-        glm::vec3 fogColor(0.58f, 0.62f, 0.65f);
 
         VkRenderingAttachmentInfo colorAttachment{};
         colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -672,7 +687,7 @@ private:
         colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachment.clearValue = { {{fogColor.r, fogColor.g, fogColor.b, 1.0f}} };
+        colorAttachment.clearValue = { {{m_fogColor.r, m_fogColor.g, m_fogColor.b, 1.0f}} };
 
         VkRenderingAttachmentInfo depthAttachment{};
         depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -691,7 +706,6 @@ private:
         renderingInfo.pDepthAttachment = &depthAttachment;
 
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
-
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSet, 0, nullptr);
 
@@ -719,6 +733,8 @@ private:
             PushConstants pc{};
             pc.mvp = proj * view * model;
             pc.modelView = view * model;
+            pc.fogColor = m_fogColor;
+            pc.fogDensity = m_fogDensity;
 
             vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
 
@@ -731,12 +747,11 @@ private:
                 m_cubeMesh.draw(commandBuffer);
             }
         }
-
         vkCmdEndRendering(commandBuffer);
 
         transitionImageLayout(commandBuffer, m_offscreenImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
 
-        // --- ПРОХОД 2: Пост-обработка (Offscreen -> Swapchain) ---
+        // --- ПРОХОД 2: Пост-обработка (Offscreen -> Swapchain) + ImGui ---
         VkImage swapchainImage = m_swapchain.getImages()[imageIndex];
         VkExtent2D swapExtent = m_swapchain.getExtent();
 
@@ -756,12 +771,12 @@ private:
         postRenderingInfo.layerCount = 1;
         postRenderingInfo.colorAttachmentCount = 1;
         postRenderingInfo.pColorAttachments = &postColorAttachment;
-        postRenderingInfo.pDepthAttachment = nullptr;
 
         vkCmdBeginRendering(commandBuffer, &postRenderingInfo);
-
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_postProcessPipeline);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_postProcessPipelineLayout, 0, 1, &m_postProcessDescriptorSet, 0, nullptr);
+
+        vkCmdPushConstants(commandBuffer, m_postProcessPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PostProcessParams), &m_ppParams);
 
         VkViewport postViewport{};
         postViewport.width = static_cast<float>(swapExtent.width);
@@ -775,6 +790,9 @@ private:
 
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
+        // Рендерим ImGui поверх пост-процесса
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+
         vkCmdEndRendering(commandBuffer);
 
         transitionImageLayout(commandBuffer, swapchainImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -784,7 +802,6 @@ private:
 
     void createSyncObjects() {
         VkDevice device = m_context.getDevice();
-
         m_imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         m_inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
 
@@ -801,6 +818,63 @@ private:
         }
     }
 
+    void initImGui() {
+        VkDescriptorPoolSize pool_sizes[] = {
+            { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+        };
+
+        VkDescriptorPoolCreateInfo pool_info = {};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        pool_info.maxSets = 1000 * IM_ARRAYSIZE(pool_sizes);
+        pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
+        pool_info.pPoolSizes = pool_sizes;
+        VK_CHECK(vkCreateDescriptorPool(m_context.getDevice(), &pool_info, nullptr, &m_imguiDescriptorPool));
+
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGui::StyleColorsDark();
+
+        ImGui_ImplGlfw_InitForVulkan(m_window.getNativeWindow(), true);
+
+        ImGui_ImplVulkan_InitInfo init_info = {};
+        init_info.Instance = m_context.getInstance();
+        init_info.PhysicalDevice = m_context.getPhysicalDevice();
+        init_info.Device = m_context.getDevice();
+        init_info.QueueFamily = m_context.findQueueFamilies().graphicsFamily.value();
+        init_info.Queue = m_context.getGraphicsQueue();
+        init_info.PipelineCache = VK_NULL_HANDLE;
+        init_info.DescriptorPool = m_imguiDescriptorPool;
+        init_info.MinImageCount = 2;
+        init_info.ImageCount = static_cast<uint32_t>(m_swapchain.getImages().size());
+
+        // Обязательно включаем Dynamic Rendering для ImGui
+        init_info.UseDynamicRendering = true;
+
+        VkPipelineRenderingCreateInfo pipelineRenderingInfo{};
+        pipelineRenderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        pipelineRenderingInfo.colorAttachmentCount = 1;
+        pipelineRenderingInfo.pColorAttachmentFormats = &m_swapchainImageFormat; // Безопасный указатель
+
+        // В новых версиях ImGui поля конфигурации пайплайна перенесены в PipelineInfoMain
+        init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        init_info.PipelineInfoMain.RenderPass = VK_NULL_HANDLE;
+        init_info.PipelineInfoMain.Subpass = 0;
+        init_info.PipelineInfoMain.PipelineRenderingCreateInfo = pipelineRenderingInfo;
+
+        ImGui_ImplVulkan_Init(&init_info);
+    }
+
     void mainLoop() {
         while (!m_window.shouldClose()) {
             m_window.pollEvents();
@@ -811,26 +885,58 @@ private:
 
             GLFWwindow* window = m_window.getNativeWindow();
 
-            if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-                if (m_firstMouse) {
-                    glfwGetCursorPos(window, &m_lastMouseX, &m_lastMouseY);
-                    m_firstMouse = false;
+            if (glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS) {
+                if (!m_f1Pressed) {
+                    m_f1Pressed = true;
+                    m_showGui = !m_showGui;
                 }
-                double xpos, ypos;
-                glfwGetCursorPos(window, &xpos, &ypos);
-                float xoffset = static_cast<float>(xpos - m_lastMouseX);
-                float yoffset = static_cast<float>(m_lastMouseY - ypos);
-                m_lastMouseX = xpos;
-                m_lastMouseY = ypos;
-                m_camera.processMouseMovement(xoffset, yoffset);
             }
             else {
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-                m_firstMouse = true;
+                m_f1Pressed = false;
             }
 
-            m_camera.processKeyboard(window, deltaTime);
+            if (m_showGui) {
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            }
+            else {
+                if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                    if (m_firstMouse) {
+                        glfwGetCursorPos(window, &m_lastMouseX, &m_lastMouseY);
+                        m_firstMouse = false;
+                    }
+                    double xpos, ypos;
+                    glfwGetCursorPos(window, &xpos, &ypos);
+                    float xoffset = static_cast<float>(xpos - m_lastMouseX);
+                    float yoffset = static_cast<float>(m_lastMouseY - ypos);
+                    m_lastMouseX = xpos;
+                    m_lastMouseY = ypos;
+                    m_camera.processMouseMovement(xoffset, yoffset);
+                }
+                else {
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                    m_firstMouse = true;
+                }
+                m_camera.processKeyboard(window, deltaTime);
+            }
+
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+
+            if (m_showGui) {
+                ImGui::Begin("PS2 Atmosphere & Post-FX", &m_showGui);
+                ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+                ImGui::SliderFloat("Fog Density", &m_fogDensity, 0.0f, 0.1f);
+                ImGui::ColorEdit3("Fog Color", glm::value_ptr(m_fogColor));
+                ImGui::SliderFloat("Bloom Threshold", &m_ppParams.bloomThreshold, 0.0f, 1.0f);
+                ImGui::SliderFloat("Bloom Intensity", &m_ppParams.bloomIntensity, 0.0f, 2.0f);
+                ImGui::SliderFloat("Saturation", &m_ppParams.saturation, 0.0f, 1.5f);
+                ImGui::SliderFloat("Dither Strength", &m_ppParams.ditherStrength, 0.0f, 2.0f);
+                ImGui::End();
+            }
+
+            ImGui::Render();
             drawFrame(deltaTime);
         }
         vkDeviceWaitIdle(m_context.getDevice());
@@ -891,6 +997,14 @@ private:
         VkDevice device = m_context.getDevice();
         if (device != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(device);
+
+            ImGui_ImplVulkan_Shutdown();
+            ImGui_ImplGlfw_Shutdown();
+            ImGui::DestroyContext();
+            if (m_imguiDescriptorPool != VK_NULL_HANDLE) {
+                vkDestroyDescriptorPool(device, m_imguiDescriptorPool, nullptr);
+                m_imguiDescriptorPool = VK_NULL_HANDLE;
+            }
 
             m_idolMesh.cleanup(m_context.getAllocator());
             m_cubeMesh.cleanup(m_context.getAllocator());
