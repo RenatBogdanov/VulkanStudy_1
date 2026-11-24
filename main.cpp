@@ -1,8 +1,8 @@
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
-#include "Buffer.h"
 #include "Camera.h"
+#include "Mesh.h"
 #include "Swapchain.h"
 #include "Vertex.h"
 #include "VulkanContext.h"
@@ -27,11 +27,11 @@ struct PushConstants {
     glm::mat4 mvp;
 };
 
-// Структура для описания объекта на сцене
 struct SceneObject {
     glm::vec3 position;
     glm::vec3 scale;
     bool isRotating;
+    bool useIdolMesh;
 };
 
 class HelloTriangleApplication {
@@ -64,15 +64,13 @@ private:
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkFence> m_inFlightFences;
 
-    Buffer m_vertexBuffer;
-    Buffer m_indexBuffer;
-    uint32_t m_indexCount = 0;
+    Mesh m_idolMesh;
+    Mesh m_cubeMesh;
 
     VkImage m_depthImage = VK_NULL_HANDLE;
     VmaAllocation m_depthAllocation = VK_NULL_HANDLE;
     VkImageView m_depthImageView = VK_NULL_HANDLE;
 
-    // Переменные для ввода
     float m_lastFrameTime = 0.0f;
     bool m_firstMouse = true;
     double m_lastMouseX = 0.0;
@@ -86,8 +84,11 @@ private:
 
         createCommandPool();
         createDepthResources();
-        createVertexBuffer();
-        createIndexBuffer();
+
+        // Загрузка моделей
+        m_cubeMesh.createProceduralCube(m_context, m_commandPool);
+        m_idolMesh.loadFromObj(m_context, m_commandPool, "models/idol.obj");
+
         createGraphicsPipeline();
         createCommandBuffers();
         createSyncObjects();
@@ -129,59 +130,6 @@ private:
         viewInfo.subresourceRange.layerCount = 1;
 
         VK_CHECK(vkCreateImageView(m_context.getDevice(), &viewInfo, nullptr, &m_depthImageView));
-    }
-
-    void createVertexBuffer() {
-        std::vector<Vertex> vertices = {
-            // Передняя
-            {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
-            {{ 0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
-            {{ 0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
-            {{-0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}},
-            // Задняя
-            {{-0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-            {{-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-            {{ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-            {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-            // Верхняя
-            {{-0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
-            {{ 0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
-            {{ 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
-            {{-0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},
-            // Нижняя
-            {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-            {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-            {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
-            {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}},
-            // Правая
-            {{ 0.5f, -0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}},
-            {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
-            {{ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}},
-            {{ 0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}},
-            // Левая
-            {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 1.0f}},
-            {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
-            {{-0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}},
-            {{-0.5f,  0.5f, -0.5f}, {1.0f, 0.0f, 1.0f}}
-        };
-
-        VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
-        m_vertexBuffer.createDeviceLocal(m_context, m_commandPool, vertices.data(), bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    }
-
-    void createIndexBuffer() {
-        std::vector<uint32_t> indices = {
-            0, 1, 2, 2, 3, 0,       // Передняя
-            4, 7, 6, 6, 5, 4,       // Задняя
-            8, 11, 10, 10, 9, 8,    // Верхняя
-            12, 13, 14, 14, 15, 12, // Нижняя
-            16, 19, 18, 18, 17, 16, // Правая
-            20, 23, 22, 22, 21, 20  // Левая
-        };
-        m_indexCount = static_cast<uint32_t>(indices.size());
-
-        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
-        m_indexBuffer.createDeviceLocal(m_context, m_commandPool, indices.data(), bufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     }
 
     std::vector<char> readFile(const std::string& filename) {
@@ -442,11 +390,6 @@ private:
         scissor.extent = extent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        VkBuffer vertexBuffers[] = { m_vertexBuffer.getBuffer() };
-        VkDeviceSize offsets[] = { 0 };
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer.getBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
         glm::mat4 view = m_camera.getViewMatrix();
         glm::mat4 proj = glm::perspective(glm::radians(45.0f), extent.width / (float)extent.height, 0.1f, 100.0f);
         proj[1][1] *= -1; // Инверсия Y для Vulkan
@@ -455,14 +398,22 @@ private:
             glm::mat4 model = glm::translate(glm::mat4(1.0f), obj.position);
             model = glm::scale(model, obj.scale);
             if (obj.isRotating) {
-                model = glm::rotate(model, time * glm::radians(45.0f), glm::vec3(1.0f, 1.0f, 0.0f));
+                model = glm::rotate(model, time * glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             }
 
             PushConstants pc{};
             pc.mvp = proj * view * model;
 
             vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
-            vkCmdDrawIndexed(commandBuffer, m_indexCount, 1, 0, 0, 0);
+
+            if (obj.useIdolMesh) {
+                m_idolMesh.bind(commandBuffer);
+                m_idolMesh.draw(commandBuffer);
+            }
+            else {
+                m_cubeMesh.bind(commandBuffer);
+                m_cubeMesh.draw(commandBuffer);
+            }
         }
 
         vkCmdEndRendering(commandBuffer);
@@ -501,7 +452,6 @@ private:
 
             GLFWwindow* window = m_window.getNativeWindow();
 
-            // Захват мыши только по нажатию правой кнопки
             if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
                 if (m_firstMouse) {
@@ -511,7 +461,7 @@ private:
                 double xpos, ypos;
                 glfwGetCursorPos(window, &xpos, &ypos);
                 float xoffset = static_cast<float>(xpos - m_lastMouseX);
-                float yoffset = static_cast<float>(m_lastMouseY - ypos); // Инверсия Y
+                float yoffset = static_cast<float>(m_lastMouseY - ypos);
                 m_lastMouseX = xpos;
                 m_lastMouseY = ypos;
                 m_camera.processMouseMovement(xoffset, yoffset);
@@ -536,13 +486,14 @@ private:
         uint32_t imageIndex = 0;
         vkAcquireNextImageKHR(device, m_swapchain.getHandle(), UINT64_MAX, m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex);
 
-        // Сцена: центральный вращающийся куб + 4 колонны
         std::vector<SceneObject> objects = {
-            {{0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, true},
-            {{-2.0f, 0.0f, -2.0f}, {0.5f, 1.5f, 0.5f}, false},
-            {{ 2.0f, 0.0f, -2.0f}, {0.5f, 1.5f, 0.5f}, false},
-            {{-2.0f, 0.0f,  2.0f}, {0.5f, 1.5f, 0.5f}, false},
-            {{ 2.0f, 0.0f,  2.0f}, {0.5f, 1.5f, 0.5f}, false}
+            // Центральная статуя (идол) - немного опущена вниз по Y
+            {{0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, false, true},
+            // 4 колонны вокруг
+            {{-3.0f, -1.0f, -3.0f}, {0.5f, 2.0f, 0.5f}, false, false},
+            {{ 3.0f, -1.0f, -3.0f}, {0.5f, 2.0f, 0.5f}, false, false},
+            {{-3.0f, -1.0f,  3.0f}, {0.5f, 2.0f, 0.5f}, false, false},
+            {{ 3.0f, -1.0f,  3.0f}, {0.5f, 2.0f, 0.5f}, false, false}
         };
 
         VK_CHECK(vkResetCommandBuffer(m_commandBuffers[m_currentFrame], 0));
@@ -584,6 +535,9 @@ private:
         if (device != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(device);
 
+            m_idolMesh.cleanup(m_context.getAllocator());
+            m_cubeMesh.cleanup(m_context.getAllocator());
+
             if (m_depthImageView != VK_NULL_HANDLE) {
                 vkDestroyImageView(device, m_depthImageView, nullptr);
                 m_depthImageView = VK_NULL_HANDLE;
@@ -593,9 +547,6 @@ private:
                 m_depthImage = VK_NULL_HANDLE;
                 m_depthAllocation = VK_NULL_HANDLE;
             }
-
-            m_vertexBuffer.cleanup(m_context.getAllocator());
-            m_indexBuffer.cleanup(m_context.getAllocator());
 
             for (VkSemaphore semaphore : m_imageAvailableSemaphores) {
                 vkDestroySemaphore(device, semaphore, nullptr);
