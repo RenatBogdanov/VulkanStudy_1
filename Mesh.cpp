@@ -1,8 +1,15 @@
-// Отключаем встроенный fast_float в tiny_obj_loader, чтобы обойти баг MSVC (ошибка C3615)
-#define TINYOBJLOADER_DISABLE_FAST_FLOAT
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 26495 26498 6287)
+#endif
 
+#define TINYOBJLOADER_DISABLE_FAST_FLOAT
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #include "Mesh.h"
 #include "VulkanContext.h"
@@ -27,7 +34,6 @@ void Mesh::loadFromObj(VulkanContext& context, VkCommandPool commandPool, const 
     std::vector<uint32_t> indices;
     std::unordered_map<Vertex, uint32_t> uniqueVertices{};
 
-    // Дефолтный цвет для модели (тёплый каменный оттенок)
     glm::vec3 defaultColor(0.78f, 0.75f, 0.68f);
 
     for (const auto& shape : shapes) {
@@ -48,7 +54,7 @@ void Mesh::loadFromObj(VulkanContext& context, VkCommandPool commandPool, const 
                 };
             }
             else {
-                vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f); // fallback
+                vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f);
             }
 
             if (index.texcoord_index >= 0) {
@@ -82,32 +88,26 @@ void Mesh::loadFromObj(VulkanContext& context, VkCommandPool commandPool, const 
 
 void Mesh::createProceduralCube(VulkanContext& context, VkCommandPool commandPool) {
     std::vector<Vertex> vertices = {
-        // Передняя
         {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}, { 0.0f,  0.0f,  1.0f}, {0.0f, 0.0f}},
         {{ 0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}, { 0.0f,  0.0f,  1.0f}, {1.0f, 0.0f}},
         {{ 0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}, { 0.0f,  0.0f,  1.0f}, {1.0f, 1.0f}},
         {{-0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 0.0f}, { 0.0f,  0.0f,  1.0f}, {0.0f, 1.0f}},
-        // Задняя
         {{-0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, { 0.0f,  0.0f, -1.0f}, {0.0f, 0.0f}},
         {{-0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, { 0.0f,  0.0f, -1.0f}, {0.0f, 1.0f}},
         {{ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, { 0.0f,  0.0f, -1.0f}, {1.0f, 1.0f}},
         {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, { 0.0f,  0.0f, -1.0f}, {1.0f, 0.0f}},
-        // Верхняя
         {{-0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, { 0.0f,  1.0f,  0.0f}, {0.0f, 0.0f}},
         {{ 0.5f,  0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, { 0.0f,  1.0f,  0.0f}, {1.0f, 0.0f}},
         {{ 0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, { 0.0f,  1.0f,  0.0f}, {1.0f, 1.0f}},
         {{-0.5f,  0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, { 0.0f,  1.0f,  0.0f}, {0.0f, 1.0f}},
-        // Нижняя
         {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}, { 0.0f, -1.0f,  0.0f}, {0.0f, 0.0f}},
         {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 0.0f}, { 0.0f, -1.0f,  0.0f}, {1.0f, 0.0f}},
         {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}, { 0.0f, -1.0f,  0.0f}, {1.0f, 1.0f}},
         {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 0.0f}, { 0.0f, -1.0f,  0.0f}, {0.0f, 1.0f}},
-        // Правая
         {{ 0.5f, -0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}, { 1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}},
         {{ 0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}, { 1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}},
         {{ 0.5f,  0.5f, -0.5f}, {0.0f, 1.0f, 1.0f}, { 1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}},
         {{ 0.5f,  0.5f,  0.5f}, {0.0f, 1.0f, 1.0f}, { 1.0f,  0.0f,  0.0f}, {0.0f, 1.0f}},
-        // Левая
         {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 1.0f}, {-1.0f,  0.0f,  0.0f}, {0.0f, 0.0f}},
         {{-0.5f, -0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}, {-1.0f,  0.0f,  0.0f}, {1.0f, 0.0f}},
         {{-0.5f,  0.5f,  0.5f}, {1.0f, 0.0f, 1.0f}, {-1.0f,  0.0f,  0.0f}, {1.0f, 1.0f}},
@@ -115,12 +115,12 @@ void Mesh::createProceduralCube(VulkanContext& context, VkCommandPool commandPoo
     };
 
     std::vector<uint32_t> indices = {
-        0, 1, 2, 2, 3, 0,       // Передняя
-        4, 7, 6, 6, 5, 4,       // Задняя
-        8, 11, 10, 10, 9, 8,    // Верхняя
-        12, 13, 14, 14, 15, 12, // Нижняя
-        16, 19, 18, 18, 17, 16, // Правая
-        20, 23, 22, 22, 21, 20  // Левая
+        0, 1, 2, 2, 3, 0,
+        4, 7, 6, 6, 5, 4,
+        8, 11, 10, 10, 9, 8,
+        12, 13, 14, 14, 15, 12,
+        16, 19, 18, 18, 17, 16,
+        20, 23, 22, 22, 21, 20
     };
 
     m_indexCount = static_cast<uint32_t>(indices.size());
@@ -141,6 +141,10 @@ void Mesh::bind(VkCommandBuffer cmd) {
 
 void Mesh::draw(VkCommandBuffer cmd) {
     vkCmdDrawIndexed(cmd, m_indexCount, 1, 0, 0, 0);
+}
+
+void Mesh::drawInstanced(VkCommandBuffer cmd, uint32_t instanceCount) {
+    vkCmdDrawIndexed(cmd, m_indexCount, instanceCount, 0, 0, 0);
 }
 
 void Mesh::cleanup(VmaAllocator allocator) {

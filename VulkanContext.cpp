@@ -2,6 +2,7 @@
 #include "Swapchain.h"
 #include "Window.h"
 
+#include <fstream>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,8 @@ namespace {
     const std::vector<const char*> DEVICE_EXTENSIONS = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
+
+    const char* SETTINGS_FILE = "settings.ini";
 
 #ifdef NDEBUG
     const bool ENABLE_VALIDATION_LAYERS = false;
@@ -99,16 +102,54 @@ void VulkanContext::pickPhysicalDevice() {
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkEnumeratePhysicalDevices(m_instance, &deviceCount, devices.data());
 
+    // Собираем список всех подходящих GPU
+    m_gpuList.clear();
     for (VkPhysicalDevice candidate : devices) {
-        if (isDeviceSuitable(candidate)) {
-            m_physicalDevice = candidate;
-            break;
-        }
+        if (!isDeviceSuitable(candidate)) continue;
+
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(candidate, &props);
+
+        GpuInfo info;
+        info.device = candidate;
+        info.name = props.deviceName;
+        info.type = props.deviceType;
+        m_gpuList.push_back(info);
     }
 
-    if (m_physicalDevice == VK_NULL_HANDLE) {
+    if (m_gpuList.empty()) {
         throw std::runtime_error("failed to find a suitable GPU!");
     }
+
+    // Читаем настройки, иначе — авто-выбор (discrete -> integrated -> first)
+    int preferredIndex = readGpuPreferenceFromFile();
+
+    if (preferredIndex >= 0 && preferredIndex < static_cast<int>(m_gpuList.size())) {
+        m_currentGpuIndex = static_cast<uint32_t>(preferredIndex);
+    }
+    else {
+        m_currentGpuIndex = 0;
+        bool found = false;
+        for (size_t i = 0; i < m_gpuList.size(); ++i) {
+            if (m_gpuList[i].type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+                m_currentGpuIndex = static_cast<uint32_t>(i);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            for (size_t i = 0; i < m_gpuList.size(); ++i) {
+                if (m_gpuList[i].type == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+                    m_currentGpuIndex = static_cast<uint32_t>(i);
+                    break;
+                }
+            }
+        }
+        // Запоминаем авто-выбор, чтобы следующий запуск был стабильным.
+        writeGpuPreferenceToFile(m_currentGpuIndex);
+    }
+
+    m_physicalDevice = m_gpuList[m_currentGpuIndex].device;
 }
 
 bool VulkanContext::isDeviceSuitable(VkPhysicalDevice device) const {
@@ -219,7 +260,6 @@ void VulkanContext::createLogicalDevice() {
     createInfo.pEnabledFeatures = nullptr;
     createInfo.enabledExtensionCount = static_cast<uint32_t>(DEVICE_EXTENSIONS.size());
     createInfo.ppEnabledExtensionNames = DEVICE_EXTENSIONS.data();
-    // Слои валидации на уровне VkDevice не включаются (только Instance)
 
     VK_CHECK(vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device));
 
@@ -237,6 +277,41 @@ void VulkanContext::createAllocator() {
     VK_CHECK(vmaCreateAllocator(&allocatorInfo, &m_allocator));
 }
 
+// ============================================================
+//  GPU PREFERENCE (settings.ini)
+// ============================================================
+void VulkanContext::saveGpuPreference(uint32_t index) {
+    if (index >= m_gpuList.size()) return;
+    writeGpuPreferenceToFile(index);
+}
+
+int VulkanContext::readGpuPreferenceFromFile() const {
+    std::ifstream file(SETTINGS_FILE);
+    if (!file.is_open()) return -1;
+
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.rfind("gpu_index=", 0) == 0) {
+            try {
+                return std::stoi(line.substr(10));
+            }
+            catch (...) {
+                return -1;
+            }
+        }
+    }
+    return -1;
+}
+
+void VulkanContext::writeGpuPreferenceToFile(uint32_t index) const {
+    std::ofstream file(SETTINGS_FILE);
+    if (!file.is_open()) return;
+    file << "gpu_index=" << index << "\n";
+}
+
+// ============================================================
+//  HELPERS
+// ============================================================
 void VulkanContext::copyBuffer(VkCommandPool commandPool, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;

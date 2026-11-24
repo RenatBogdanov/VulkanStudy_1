@@ -26,8 +26,8 @@ layout(binding = 1) uniform SceneUBO {
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
-    float furLayer;
-    float emissive;   // 0 = normal lighting, > 0 = force color = pointLightColor * emissive
+    uint furShellCount;        // 1 = обычный меш, >1 = Instanced fur
+    float emissive;            // 0 = normal lighting, > 0 = force color = pointLightColor * emissive
 } push;
 
 void main() {
@@ -37,11 +37,20 @@ void main() {
 
     float slopeMask = smoothstep(scene.furParams.w, scene.furParams.w + 0.25, upFactor);
 
+    // === Instanced fur ===
+    // Instance 0 -> furLayer = 0 (базовый непрозрачный меш, БЕЗ смещения и БЕЗ discard).
+    // Instance N-1 -> furLayer = 1 (верхний слой меха).
+    // При furShellCount == 1 весь объект — базовый меш.
+    float furLayer = 0.0;
+    if (push.furShellCount > 1u) {
+        furLayer = float(gl_InstanceIndex) / (float(push.furShellCount) - 1.0);
+    }
+
     vec3 displacedPos = inPosition;
-    if (push.furLayer > 0.001) {
-        displacedPos += normalize(inNormal) * (push.furLayer * scene.furParams.y * slopeMask);
+    if (furLayer > 0.001) {
+        displacedPos += normalize(inNormal) * (furLayer * scene.furParams.y * slopeMask);
         float wind = sin(scene.furParams.x * 2.5 + inPosition.x * 4.0 + inPosition.z * 3.0)
-                   * 0.02 * push.furLayer * push.furLayer * slopeMask;
+                   * 0.02 * furLayer * furLayer * slopeMask;
         displacedPos.x += wind;
         displacedPos.z += wind * 0.5;
     }
@@ -50,20 +59,17 @@ void main() {
     gl_Position   = scene.viewProj * worldPos;
     fragViewPos   = (scene.view * worldPos).xyz;
     fragTexCoord  = inTexCoord;
-    vFurLayer     = push.furLayer;
+    vFurLayer     = furLayer;
     vSlopeMask    = slopeMask;
 
     // ===================== GOURAUD LIGHTING =====================
-    // 1) Hemisphere ambient (небо сверху, земля снизу)
     float hemi = worldNormal.y * 0.5 + 0.5;
     vec3 ambient = mix(scene.groundAmbientColor.rgb, scene.skyAmbientColor.rgb, hemi);
 
-    // 2) Directional sun
     vec3 sunDir = normalize(scene.sunDirection.xyz);
     float sunDiff = max(dot(worldNormal, sunDir), 0.0);
     vec3 sunLight = scene.sunColor.rgb * sunDiff;
 
-    // 3) Dynamic point light (квадратичное затухание, w = half-brightness radius)
     vec3 toLight = scene.pointLightPos.xyz - worldPos.xyz;
     float d      = length(toLight);
     vec3 L       = toLight / max(d, 0.001);
@@ -74,7 +80,6 @@ void main() {
 
     vec3 litColor = inColor * (ambient + sunLight + pointLight);
 
-    // Emissive override (для «огонька» и любых самосветящихся объектов)
     if (push.emissive > 0.001) {
         litColor = scene.pointLightColor.rgb * push.emissive;
     }

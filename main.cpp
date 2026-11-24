@@ -21,6 +21,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -33,13 +34,19 @@ const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
 // ============================================================
-//  PUSH CONSTANTS (80 байт с выравниванием mat4)
+//  PUSH CONSTANTS (Instanced fur)
+//  sizeof = 72 байта (без GLM_FORCE_ALIGNED_GENTYPES).
+//  GLSL-блок: mat4 model; uint furShellCount; float emissive;
 // ============================================================
 struct PushConstants {
-    glm::mat4 model;
-    float     furLayer = 0.0f;
+    glm::mat4 model{};
+    uint32_t  furShellCount = 1;
     float     emissive = 0.0f;
 };
+
+static_assert(sizeof(PushConstants) <= 128, "PushConstants must fit in maxPushConstantsSize (>=128)");
+static_assert(offsetof(PushConstants, furShellCount) == 64, "furShellCount offset must match GLSL layout");
+static_assert(offsetof(PushConstants, emissive) == 68, "emissive offset must match GLSL layout");
 
 // ============================================================
 //  SCENE UBO Ч std140, 256 байт
@@ -51,8 +58,8 @@ struct SceneUBO {
     glm::vec4 furParams;             // offset 144  (x=time, y=furLength, z=furDensity, w=slopeThreshold)
     glm::vec4 sunDirection;          // offset 160  (xyz = normalized dir to sun)
     glm::vec4 sunColor;              // offset 176  (rgb = sun color)
-    glm::vec4 skyAmbientColor;       // offset 192  (rgb = sky hemisphere ambient)
-    glm::vec4 groundAmbientColor;    // offset 208  (rgb = ground hemisphere ambient)
+    glm::vec4 skyAmbientColor;       // offset 192
+    glm::vec4 groundAmbientColor;    // offset 208
     glm::vec4 pointLightPos;         // offset 224  (xyz = world pos, w = falloff radius)
     glm::vec4 pointLightColor;       // offset 240  (rgb = tint * intensity)
 };
@@ -69,12 +76,12 @@ struct PostProcessParams {
 };
 
 struct SceneObject {
-    glm::vec3 position;
-    glm::vec3 scale;
-    bool  isRotating;
-    bool  useIdolMesh;
-    bool  isFurry;
-    float emissive = 0.0f;
+    glm::vec3 position{};
+    glm::vec3 scale{ 1.0f };
+    bool      isRotating{ false };
+    bool      useIdolMesh{ false };
+    bool      isFurry{ false };
+    float     emissive{ 0.0f };
 };
 
 // ============================================================
@@ -111,10 +118,10 @@ private:
     VkPipelineLayout m_postProcessPipelineLayout = VK_NULL_HANDLE;
     VkPipeline       m_postProcessPipeline = VK_NULL_HANDLE;
 
-    Texture             m_texture;
+    Texture               m_texture;
     VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool    m_descriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSet     m_descriptorSet = VK_NULL_HANDLE;
+    VkDescriptorPool      m_descriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSet       m_descriptorSet = VK_NULL_HANDLE;
 
     VkBuffer       m_sceneUboBuffer = VK_NULL_HANDLE;
     VmaAllocation  m_sceneUboAllocation = VK_NULL_HANDLE;
@@ -145,6 +152,10 @@ private:
     bool             m_showGui = false;
     bool             m_f1Pressed = false;
 
+    // --- GPU selection (Combo) ---
+    int  m_selectedGpuIndex = 0;
+    bool m_gpuChangeHint = false;
+
     // --- Fog / Post-FX ---
     bool              m_fogEnabled = true;
     float             m_fogDensity = 0.018f;
@@ -159,7 +170,7 @@ private:
     float m_slopeThreshold = 0.45f;
 
     // --- Lighting ---
-    float     m_sunAzimuth = 0.6435f;   // atan2(0.3, 0.4)
+    float     m_sunAzimuth = 0.6435f;
     float     m_sunElevation = 0.55f;
     float     m_sunIntensity = 1.85f;
     glm::vec3 m_skyAmbient = glm::vec3(0.18f, 0.21f, 0.26f);
@@ -188,6 +199,8 @@ private:
     // ============================================================
     void initVulkan() {
         m_context.init(m_window);
+        m_selectedGpuIndex = static_cast<int>(m_context.getCurrentGpuIndex());
+
         m_swapchain.init(m_context, m_window);
         m_swapchainImageFormat = m_swapchain.getImageFormat();
 
@@ -262,7 +275,6 @@ private:
     }
 
     void recreateSwapchain() {
-        // ќкно может быть свЄрнуто (Alt+Tab / minimize) Ч ждЄм восстановлени€ размера.
         waitForFramebuffer();
         if (m_window.shouldClose()) {
             return;
@@ -947,6 +959,7 @@ private:
         scissor.extent = { m_renderWidth, m_renderHeight };
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+        // === Instanced fur: один vkCmdDrawIndexed на объект ===
         for (const auto& obj : objects) {
             glm::mat4 model = glm::translate(glm::mat4(1.0f), obj.position);
             model = glm::scale(model, obj.scale);
@@ -954,25 +967,25 @@ private:
                 model = glm::rotate(model, time * glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             }
 
-            uint32_t shells = (m_furEnabled && obj.isFurry) ? static_cast<uint32_t>(m_shellCount) : 1;
+            uint32_t shells = (m_furEnabled && obj.isFurry)
+                ? static_cast<uint32_t>(m_shellCount)
+                : 1u;
 
-            for (uint32_t i = 0; i < shells; i++) {
-                PushConstants pc{};
-                pc.model = model;
-                pc.furLayer = (shells > 1) ? (static_cast<float>(i) / static_cast<float>(shells - 1)) : 0.0f;
-                pc.emissive = obj.emissive;
+            PushConstants pc{};
+            pc.model = model;
+            pc.furShellCount = shells;
+            pc.emissive = obj.emissive;
 
-                vkCmdPushConstants(commandBuffer, m_pipelineLayout,
-                    VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdPushConstants(commandBuffer, m_pipelineLayout,
+                VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
 
-                if (obj.useIdolMesh) {
-                    m_idolMesh.bind(commandBuffer);
-                    m_idolMesh.draw(commandBuffer);
-                }
-                else {
-                    m_cubeMesh.bind(commandBuffer);
-                    m_cubeMesh.draw(commandBuffer);
-                }
+            if (obj.useIdolMesh) {
+                m_idolMesh.bind(commandBuffer);
+                m_idolMesh.drawInstanced(commandBuffer, shells);
+            }
+            else {
+                m_cubeMesh.bind(commandBuffer);
+                m_cubeMesh.drawInstanced(commandBuffer, shells);
             }
         }
         vkCmdEndRendering(commandBuffer);
@@ -1038,7 +1051,6 @@ private:
         while (!m_window.shouldClose()) {
             m_window.pollEvents();
 
-            // ќкно свЄрнуто (Alt+Tab / minimize): не рендерим и не пересоздаЄм swapchain.
             if (framebufferIsZero()) {
                 glfwWaitEvents();
                 m_lastFrameTime = static_cast<float>(glfwGetTime());
@@ -1121,6 +1133,32 @@ private:
                     recreateSwapchain();
                 }
 
+                // --- GPU selection ---
+                ImGui::Text("Active GPU: %s", m_context.getCurrentGpuName().c_str());
+
+                const auto& gpus = m_context.getAvailableGpus();
+                std::vector<const char*> gpuNames;
+                gpuNames.reserve(gpus.size());
+                for (const auto& gpu : gpus) gpuNames.push_back(gpu.name.c_str());
+
+                if (!gpuNames.empty()) {
+                    if (ImGui::Combo("GPU", &m_selectedGpuIndex, gpuNames.data(),
+                        static_cast<int>(gpuNames.size()))) {
+                        if (m_selectedGpuIndex != static_cast<int>(m_context.getCurrentGpuIndex())) {
+                            m_context.saveGpuPreference(static_cast<uint32_t>(m_selectedGpuIndex));
+                            m_gpuChangeHint = true;
+                        }
+                        else {
+                            m_gpuChangeHint = false;
+                        }
+                    }
+                }
+                if (m_gpuChangeHint) {
+                    ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                        "Restart application to apply GPU change");
+                }
+
+                // --- Internal resolution ---
                 int currentRes = 1;
                 if (m_renderWidth == 512)  currentRes = 0;
                 else if (m_renderWidth == 640)  currentRes = 1;
@@ -1156,7 +1194,7 @@ private:
                 ImGui::Separator();
 
                 // --- Fur / Grass ---
-                ImGui::Text("Colossus Fur / Grass (Shells)");
+                ImGui::Text("Colossus Fur / Grass (Shells, Instanced)");
                 ImGui::Checkbox("Enable Fur", &m_furEnabled);
                 ImGui::SliderInt("Shell Count", &m_shellCount, 4, 32);
                 ImGui::SliderFloat("Fur Length", &m_furLength, 0.02f, 0.5f);
@@ -1195,7 +1233,6 @@ private:
     void drawFrame(float deltaTime) {
         (void)deltaTime;
 
-        // ќкно могло быть свЄрнуто между кадрами Ч не пытаемс€ рисовать.
         if (framebufferIsZero()) {
             return;
         }
@@ -1209,7 +1246,6 @@ private:
             VK_NULL_HANDLE, &imageIndex);
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            // ‘енс Ќ≈ сбрасываем Ч кадр не отправлен, синхронизаци€ не ломаетс€.
             recreateSwapchain();
             return;
         }
@@ -1273,16 +1309,12 @@ private:
         ubo.view = view;
         ubo.fogColorDensity = glm::vec4(m_fogColor, m_fogEnabled ? m_fogDensity : 0.0f);
         ubo.furParams = glm::vec4(m_lastFrameTime, m_furLength, m_furDensity, m_slopeThreshold);
-
         ubo.sunDirection = glm::vec4(glm::normalize(sunDir), 0.0f);
         ubo.sunColor = glm::vec4(glm::vec3(1.0f, 0.95f, 0.90f) * m_sunIntensity, 1.0f);
-
         ubo.skyAmbientColor = glm::vec4(m_skyAmbient, 1.0f);
         ubo.groundAmbientColor = glm::vec4(m_groundAmbient, 1.0f);
-
         ubo.pointLightPos = glm::vec4(m_pointLightPos, m_pointLightRadius);
         ubo.pointLightColor = glm::vec4(m_pointLightColorBase * m_pointLightIntensity, 1.0f);
-
         memcpy(m_sceneUboMapped, &ubo, sizeof(ubo));
 
         // --- Record & submit ---

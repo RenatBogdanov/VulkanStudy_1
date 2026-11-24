@@ -19,7 +19,13 @@ public:
     void createProceduralCube(VulkanContext& context, VkCommandPool commandPool);
 
     void bind(VkCommandBuffer cmd);
+
+    // Обычная отрисовка (1 инстанс)
     void draw(VkCommandBuffer cmd);
+
+    // Instanced-отрисовка (для слоёв меха: instanceCount = количество шеллов)
+    void drawInstanced(VkCommandBuffer cmd, uint32_t instanceCount);
+
     void cleanup(VmaAllocator allocator);
 
 private:
