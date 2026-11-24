@@ -1,39 +1,106 @@
-﻿# Vulkan Extension Checker (Windows)
+﻿# Физические устройства в Vulkan
 
-Простая программа для проверки установки Vulkan SDK и доступных расширений на Windows. Идеальный первый шаг перед изучением Vulkan API.
+Физические устройства (GPU) представляются в Vulkan через `VkPhysicalDevice` — непрозрачный указатель, который позволяет получать информацию о возможностях и характеристиках оборудования.
 
-## Что делает?
-- Проверяет работоспособность Vulkan SDK
-- Выводит количество доступных расширений Vulkan в консоль
+---
 
-## Требования
-- [Vulkan SDK](https://vulkan.lunarg.com/) (установленный в `C:\VulkanSDK\`)
-- Visual Studio 2022 (Community подойдет)
-- Совместимые драйверы GPU (проверьте через `vulkaninfo.exe` из SDK)
+## Получение списка устройств
 
-## Настройка проекта в Visual Studio
-1. Создайте **Empty Project** → C++
-2. Добавьте `main.cpp` с кодом из примера
-3. В свойствах проекта:
-   - **C/C++ → Language → C++ Language Standard**: Установите **C++17** или новее
-   - **C/C++ → General → Additional Include Directories**:  
-     `C:\VulkanSDK\[версия]\Include`
-   - **Linker → General → Additional Library Directories**:  
-     `C:\VulkanSDK\[версия]\Lib`
-   - **Linker → Input → Additional Dependencies**:  
-     Добавьте `vulkan-1.lib`
+```cpp
+uint32_t deviceCount = 0;
+vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
 
-## Пример вывода
-```
-20 extensions available
+std::vector<VkPhysicalDevice> devices(deviceCount);
+vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 ```
 
-## Если выводится "0 extensions"
-1. Проверьте путь к SDK в настройках проекта
-2. Убедитесь, что драйверы GPU поддерживают Vulkan (скачайте актуальные драйверы)
-3. Запустите `vulkaninfo.exe` из папки `C:\VulkanSDK\[версия]\Bin` для диагностики
+**Важно:** Сначала вызывается функция для получения количества устройств, затем — для получения самих дескрипторов.
 
-> **Совет для новичков**:  
-> - Замените `[версия]` на актуальную (например, `1.4.309.0`)  
-> - Программа не требует создания окна или графического вывода – это чистая проверка окружения  
-> - Успешный запуск означает готовность к следующим шагам в изучении Vulkan
+---
+
+## Свойства устройства
+
+```cpp
+VkPhysicalDeviceProperties properties;
+vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+
+// Основные поля:
+properties.deviceName;      // Название GPU (например, "NVIDIA GeForce RTX 3090")
+properties.deviceType;      // Тип устройства (дискретная/встроенная видеокарта и др.)
+properties.apiVersion;      // Поддерживаемая версия Vulkan
+```
+
+**Типы устройств:**
+```cpp
+VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU   // Дискретная видеокарта (наилучший выбор)
+VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU // Встроенная графика
+VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU    // Виртуальная видеокарта
+VK_PHYSICAL_DEVICE_TYPE_CPU           // Эмуляция на CPU
+```
+
+---
+
+## Функциональные возможности
+
+```cpp
+VkPhysicalDeviceFeatures features;
+vkGetPhysicalDeviceFeatures(physicalDevice, &features);
+
+// Проверка поддержки возможностей:
+if (features.geometryShader) {
+    // Геометрические шейдеры поддерживаются
+}
+```
+
+**Ключевые возможности:**
+- `geometryShader` — поддержка геометрических шейдеров
+- `tessellationShader` — поддержка тесселяционных шейдеров
+- `samplerAnisotropy` — анизотропная фильтрация
+- `wideLines` — широкие линии
+
+---
+
+## Выбор устройства (пример)
+
+```cpp
+VkPhysicalDevice SelectSuitableDevice(VkInstance instance) {
+    uint32_t deviceCount;
+    vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+    
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+    
+    for (const auto& device : devices) {
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(device, &properties);
+        
+        // Выбираем дискретную видеокарту
+        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            return device;
+        }
+    }
+    
+    // Если дискретной нет, возвращаем первую доступную
+    return devices.empty() ? VK_NULL_HANDLE : devices[0];
+}
+```
+
+---
+
+## Критические моменты
+
+1. **Проверяйте наличие устройств** перед их использованием:
+   ```cpp
+   if (deviceCount == 0) {
+       // Обработка отсутствия Vulkan-совместимых устройств
+   }
+   ```
+
+2. **Приоритет выбора устройств:**
+   - Дискретная видеокарта (`VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU`)
+   - Встроенная графика (`VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU`)
+   - Последнее средство — эмуляция на CPU
+
+3. **Не забывайте проверять функциональные возможности** перед использованием специфических функций Vulkan
+
+4. Физические устройства **не требуют явного удаления** — они уничтожаются автоматически при уничтожении `VkInstance`
