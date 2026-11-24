@@ -7,8 +7,6 @@
 
 // ============================================================
 //  PUSH CONSTANTS (Instanced fur)
-//  sizeof = 72 байта (без GLM_FORCE_ALIGNED_GENTYPES).
-//  GLSL-блок: mat4 model; uint furShellCount; float emissive;
 // ============================================================
 struct PushConstants {
     glm::mat4 model{};
@@ -26,19 +24,19 @@ static_assert(offsetof(PushConstants, emissive) == 68, "emissive offset must mat
 struct SceneUBO {
     glm::mat4 viewProj;
     glm::mat4 view;
-    glm::vec4 fogColorDensity;       // rgb = color, a = density
-    glm::vec4 furParams;             // x=time, y=furLength, z=furDensity, w=slopeThreshold
-    glm::vec4 sunDirection;          // xyz = normalized dir to sun
-    glm::vec4 sunColor;              // rgb = sun color
-    glm::vec4 skyAmbientColor;       // rgb = sky hemisphere ambient
-    glm::vec4 groundAmbientColor;    // rgb = ground hemisphere ambient
-    glm::vec4 pointLightPos;         // xyz = world pos, w = falloff radius
-    glm::vec4 pointLightColor;       // rgb = tint * intensity
+    glm::vec4 fogColorDensity;
+    glm::vec4 furParams;
+    glm::vec4 sunDirection;
+    glm::vec4 sunColor;
+    glm::vec4 skyAmbientColor;
+    glm::vec4 groundAmbientColor;
+    glm::vec4 pointLightPos;
+    glm::vec4 pointLightColor;
 };
 static_assert(sizeof(SceneUBO) == 256, "SceneUBO must be 256 bytes for std140 layout");
 
 // ============================================================
-//  POST-PROCESS (совпадает с postprocess.frag push constant)
+//  POST-PROCESS
 // ============================================================
 struct PostProcessParams {
     float bloomThreshold = 0.88f;
@@ -60,11 +58,15 @@ struct SceneObject {
 };
 
 // ============================================================
-//  ENGINE SETTINGS Ч всЄ, что настраиваетс€ из ImGui
+//  ENGINE SETTINGS
 // ============================================================
 struct EngineSettings {
     // --- UI ---
     bool showGui = false;
+
+    // --- Selection ---
+    int hoveredObjectIndex = -1;
+    int selectedObjectIndex = -1;
 
     // --- GPU selection ---
     int  selectedGpuIndex = 0;

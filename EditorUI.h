@@ -3,6 +3,7 @@
 #include "RenderTypes.h"
 
 #include <vulkan/vulkan.h>
+#include <vector>
 
 class VulkanContext;
 class Window;
@@ -26,6 +27,7 @@ public:
         VulkanContext& context,
         Window& window,
         bool gamepadConnected,
+        std::vector<SceneObject>& objects,
         EditorActions& actions);
 
 private:

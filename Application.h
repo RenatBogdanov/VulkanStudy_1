@@ -29,6 +29,7 @@ private:
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
     void initVulkan();
+    void initScene();
     void mainLoop();
     void drawFrame(float deltaTime);
     void cleanup();
@@ -42,20 +43,20 @@ private:
     void waitForFramebuffer();
 
     void updatePointLightAnimation(float time);
-    std::vector<SceneObject> buildSceneObjects() const;
 
-    Window           m_window;
-    VulkanContext    m_context;
-    Swapchain        m_swapchain;
-    Camera           m_camera;
-    Gamepad          m_gamepad;
-    Mesh             m_idolMesh;
-    Mesh             m_cubeMesh;
-    Texture          m_texture;
+    Window            m_window;
+    VulkanContext     m_context;
+    Swapchain         m_swapchain;
+    Camera            m_camera;
+    Gamepad           m_gamepad;
+    Mesh              m_idolMesh;
+    Mesh              m_cubeMesh;
+    Texture           m_texture;
     OffscreenRenderer m_offscreenRenderer;
-    EditorUI         m_editorUI;
+    EditorUI          m_editorUI;
 
-    EngineSettings   m_settings;
+    EngineSettings    m_settings;
+    std::vector<SceneObject> m_sceneObjects;
 
     VkCommandPool                m_commandPool = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> m_commandBuffers;

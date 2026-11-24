@@ -51,8 +51,21 @@ void Application::initVulkan() {
         m_settings.renderWidth, m_settings.renderHeight);
 
     m_editorUI.init(m_context, m_window, m_swapchain);
+    initScene();
 
     createSyncObjects();
+}
+
+void Application::initScene() {
+    m_sceneObjects = {
+        {{ 0.0f, -1.00f,  0.0f}, {1.0f, 1.0f, 1.0f},   false, true,  true  }, // Idol
+        {{-3.0f, -1.00f, -3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  }, // Columns
+        {{ 3.0f, -1.00f, -3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
+        {{-3.0f, -1.00f,  3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
+        {{ 3.0f, -1.00f,  3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
+        {{ 0.0f, -1.05f,  0.0f}, {20.0f, 0.05f, 20.0f}, false, false, false }, // Ground
+        {{ 3.5f, 0.5f, 0.0f},    {0.2f, 0.2f, 0.2f},   false, false, false }  // Fire
+    };
 }
 
 void Application::cleanup() {
@@ -62,11 +75,11 @@ void Application::cleanup() {
 
         m_editorUI.cleanup(device);
 
+        m_offscreenRenderer.cleanup(m_context);
+
         m_idolMesh.cleanup(m_context.getAllocator());
         m_cubeMesh.cleanup(m_context.getAllocator());
         m_texture.cleanup(device, m_context.getAllocator());
-
-        m_offscreenRenderer.cleanup(m_context);
 
         for (VkSemaphore semaphore : m_imageAvailableSemaphores) vkDestroySemaphore(device, semaphore, nullptr);
         for (VkFence fence : m_inFlightFences)                    vkDestroyFence(device, fence, nullptr);
@@ -147,38 +160,22 @@ void Application::recreateSwapchain() {
 }
 
 // ============================================================
-//  SCENE
+//  SCENE UPDATE
 // ============================================================
 void Application::updatePointLightAnimation(float time) {
-    if (!m_settings.animatePointLight) return;
-    const float R = 3.5f;
-    m_settings.pointLightPos = glm::vec3(
-        std::cos(time * 0.7f) * R,
-        0.5f + std::sin(time * 1.3f) * 0.3f,
-        std::sin(time * 0.7f) * R
-    );
-}
+    if (m_settings.animatePointLight) {
+        const float R = 3.5f;
+        m_settings.pointLightPos = glm::vec3(
+            std::cos(time * 0.7f) * R,
+            0.5f + std::sin(time * 1.3f) * 0.3f,
+            std::sin(time * 0.7f) * R
+        );
+    }
 
-std::vector<SceneObject> Application::buildSceneObjects() const {
-    std::vector<SceneObject> objects = {
-        {{ 0.0f, -1.00f,  0.0f}, {1.0f, 1.0f, 1.0f},   false, true,  true  }, // Idol
-        {{-3.0f, -1.00f, -3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  }, // Columns
-        {{ 3.0f, -1.00f, -3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
-        {{-3.0f, -1.00f,  3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
-        {{ 3.0f, -1.00f,  3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
-        {{ 0.0f, -1.05f,  0.0f}, {20.0f, 0.05f, 20.0f}, false, false, true } // Ground
-    };
-
-    SceneObject fire;
-    fire.position = m_settings.pointLightPos;
-    fire.scale = glm::vec3(0.2f);
-    fire.isRotating = false;
-    fire.useIdolMesh = false;
-    fire.isFurry = false;
-    fire.emissive = m_settings.pointLightIntensity * 5.0f;
-    objects.push_back(fire);
-
-    return objects;
+    // Синхронизируем позицию куба-огонька (последний объект в массиве)
+    if (!m_sceneObjects.empty()) {
+        m_sceneObjects.back().position = m_settings.pointLightPos;
+    }
 }
 
 // ============================================================
@@ -256,10 +253,70 @@ void Application::mainLoop() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        // --- Raycasting / Selection ---
+        if (m_settings.showGui && !ImGui::GetIO().WantCaptureMouse) {
+            double xpos, ypos;
+            glfwGetCursorPos(window, &xpos, &ypos);
+            int w, h;
+            m_window.getFramebufferSize(&w, &h);
+
+            if (w > 0 && h > 0) {
+                float xndc = (2.0f * static_cast<float>(xpos)) / w - 1.0f;
+                float yndc = (2.0f * static_cast<float>(ypos)) / h - 1.0f;
+
+                glm::mat4 view = m_camera.getViewMatrix();
+                glm::mat4 proj = glm::perspective(glm::radians(45.0f),
+                    m_offscreenRenderer.getRenderWidth() / static_cast<float>(m_offscreenRenderer.getRenderHeight()),
+                    0.1f, 100.0f);
+                proj[1][1] *= -1; // Vulkan Y-down
+
+                glm::vec4 rayClip(xndc, yndc, -1.0f, 1.0f);
+                glm::vec4 rayEye = glm::inverse(proj) * rayClip;
+                rayEye = glm::vec4(rayEye.x, rayEye.y, -1.0f, 0.0f);
+
+                glm::vec3 rayDir = glm::normalize(glm::vec3(glm::inverse(view) * rayEye));
+                glm::vec3 rayOrigin = glm::vec3(glm::inverse(view)[3]);
+
+                float closestT = 99999.0f;
+                int hoveredIdx = -1;
+
+                for (size_t i = 0; i < m_sceneObjects.size(); ++i) {
+                    if (i == 5) continue; // Пропускаем землю, чтобы она не перекрывала объекты
+
+                    const auto& obj = m_sceneObjects[i];
+                    glm::vec3 center = obj.position;
+                    float radius = glm::length(obj.scale) * 0.5f;
+
+                    // Ray-Sphere intersection
+                    glm::vec3 oc = rayOrigin - center;
+                    float b = glm::dot(oc, rayDir);
+                    float c = glm::dot(oc, oc) - radius * radius;
+                    float disc = b * b - c;
+
+                    if (disc > 0.0f) {
+                        float t = -b - std::sqrt(disc);
+                        if (t > 0.0f && t < closestT) {
+                            closestT = t;
+                            hoveredIdx = static_cast<int>(i);
+                        }
+                    }
+                }
+
+                m_settings.hoveredObjectIndex = hoveredIdx;
+
+                if (hoveredIdx != -1 && ImGui::IsMouseClicked(0)) {
+                    m_settings.selectedObjectIndex = hoveredIdx;
+                }
+            }
+        }
+        else {
+            m_settings.hoveredObjectIndex = -1;
+        }
+
         EditorActions actions;
         if (m_settings.showGui) {
             m_editorUI.render(m_settings, m_context, m_window,
-                m_gamepad.isConnected(), actions);
+                m_gamepad.isConnected(), m_sceneObjects, actions);
         }
 
         ImGui::Render();
@@ -313,15 +370,23 @@ void Application::drawFrame(float deltaTime) {
         0.1f, 100.0f);
     proj[1][1] *= -1;
 
-    // --- Scene objects ---
-    std::vector<SceneObject> objects = buildSceneObjects();
+    // --- Apply Selection / Hover Highlight ---
+    std::vector<SceneObject> renderObjects = m_sceneObjects;
+    for (size_t i = 0; i < renderObjects.size(); ++i) {
+        if (static_cast<int>(i) == m_settings.hoveredObjectIndex) {
+            renderObjects[i].emissive += 0.25f + 0.1f * std::sin(m_lastFrameTime * 5.0f);
+        }
+        if (static_cast<int>(i) == m_settings.selectedObjectIndex) {
+            renderObjects[i].emissive += 0.4f;
+        }
+    }
 
     // --- Record ---
     VK_CHECK(vkResetCommandBuffer(m_commandBuffers[m_currentFrame], 0));
     m_offscreenRenderer.recordCommandBuffer(
         m_commandBuffers[m_currentFrame],
         m_swapchain, imageIndex,
-        objects, m_settings, m_lastFrameTime,
+        renderObjects, m_settings, m_lastFrameTime,
         view, proj);
 
     // --- Submit ---

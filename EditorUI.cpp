@@ -77,6 +77,7 @@ void EditorUI::render(EngineSettings& settings,
     VulkanContext& context,
     Window& window,
     bool gamepadConnected,
+    std::vector<SceneObject>& objects,
     EditorActions& actions) {
     ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
     ImGui::Begin("PS2 Atmosphere & Post-FX", &settings.showGui);
@@ -176,6 +177,21 @@ void EditorUI::render(EngineSettings& settings,
         ImGui::ColorEdit3("Point Light Color", glm::value_ptr(settings.pointLightColorBase));
         if (!settings.animatePointLight) {
             ImGui::SliderFloat3("Point Light Pos", glm::value_ptr(settings.pointLightPos), -10.0f, 10.0f);
+        }
+    }
+
+    // --- Selected Object Inspector ---
+    if (settings.selectedObjectIndex >= 0 && settings.selectedObjectIndex < static_cast<int>(objects.size())) {
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Selected Object (Index %d)", settings.selectedObjectIndex);
+        auto& obj = objects[settings.selectedObjectIndex];
+        ImGui::DragFloat3("Position", glm::value_ptr(obj.position), 0.05f);
+        ImGui::DragFloat3("Scale", glm::value_ptr(obj.scale), 0.05f, 0.1f, 20.0f);
+        ImGui::Checkbox("Is Furry", &obj.isFurry);
+        ImGui::Checkbox("Rotate", &obj.isRotating);
+
+        if (ImGui::Button("Deselect")) {
+            settings.selectedObjectIndex = -1;
         }
     }
 
