@@ -3,7 +3,6 @@
 #include "VulkanUtils.h"
 #include "Window.h"
 
-#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -36,10 +35,8 @@ private:
     VulkanContext m_context;
     Swapchain m_swapchain;
 
-    VkRenderPass m_renderPass = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
-    std::vector<VkFramebuffer> m_swapChainFramebuffers;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> m_commandBuffers;
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
@@ -50,58 +47,16 @@ private:
     void initVulkan() {
         m_context.init(m_window);
         m_swapchain.init(m_context, m_window);
-        createRenderPass();
         createGraphicsPipeline();
-        createFramebuffers();
         createCommandPool();
         createCommandBuffers();
         createSyncObjects();
     }
 
-    void createRenderPass() {
-        VkAttachmentDescription colorAttachment{};
-        colorAttachment.format = m_swapchain.getImageFormat();
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-        VkAttachmentReference colorAttachmentRef{};
-        colorAttachmentRef.attachment = 0;
-        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        VkSubpassDescription subpass{};
-        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 1;
-        subpass.pColorAttachments = &colorAttachmentRef;
-
-        VkSubpassDependency dependency{};
-        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-        dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.srcAccessMask = 0;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-        VkRenderPassCreateInfo renderPassInfo{};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &colorAttachment;
-        renderPassInfo.subpassCount = 1;
-        renderPassInfo.pSubpasses = &subpass;
-        renderPassInfo.dependencyCount = 1;
-        renderPassInfo.pDependencies = &dependency;
-
-        VK_CHECK(vkCreateRenderPass(m_context.getDevice(), &renderPassInfo, nullptr, &m_renderPass));
-    }
-
     std::vector<char> readFile(const std::string& filename) {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
         if (!file.is_open()) {
-            throw std::runtime_error("failed to open file!");
+            throw std::runtime_error("failed to open file: " + filename);
         }
         size_t fileSize = (size_t)file.tellg();
         std::vector<char> buffer(fileSize);
@@ -125,42 +80,8 @@ private:
     void createGraphicsPipeline() {
         VkDevice device = m_context.getDevice();
 
-        const char* vertShaderCode = R"(
-        #version 450
-
-        layout(location = 0) out vec3 fragColor;
-
-        vec2 positions[3] = vec2[](
-            vec2(0.0, -0.5),
-            vec2(0.5, 0.5),
-            vec2(-0.5, 0.5)
-        );
-
-        vec3 colors[3] = vec3[](
-            vec3(1.0, 0.0, 0.0),
-            vec3(0.0, 1.0, 0.0),
-            vec3(0.0, 0.0, 1.0)
-        );
-
-        void main() {
-            gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-            fragColor = colors[gl_VertexIndex];
-        }
-        )";
-
-        const char* fragShaderCode = R"(
-        #version 450
-
-        layout(location = 0) in vec3 fragColor;
-        layout(location = 0) out vec4 outColor;
-
-        void main() {
-            outColor = vec4(fragColor, 1.0);
-        }
-        )";
-
-        std::vector<char> vertShaderSPV = compileShader(vertShaderCode, "vertex");
-        std::vector<char> fragShaderSPV = compileShader(fragShaderCode, "fragment");
+        std::vector<char> vertShaderSPV = readFile("shaders/triangle.vert.spv");
+        std::vector<char> fragShaderSPV = readFile("shaders/triangle.frag.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderSPV);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderSPV);
@@ -240,8 +161,15 @@ private:
 
         VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout));
 
+        VkFormat swapchainFormat = m_swapchain.getImageFormat();
+        VkPipelineRenderingCreateInfo pipelineRenderingInfo{};
+        pipelineRenderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        pipelineRenderingInfo.colorAttachmentCount = 1;
+        pipelineRenderingInfo.pColorAttachmentFormats = &swapchainFormat;
+
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.pNext = &pipelineRenderingInfo;
         pipelineInfo.stageCount = 2;
         pipelineInfo.pStages = shaderStages;
         pipelineInfo.pVertexInputState = &vertexInputInfo;
@@ -252,7 +180,7 @@ private:
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pDynamicState = &dynamicState;
         pipelineInfo.layout = m_pipelineLayout;
-        pipelineInfo.renderPass = m_renderPass;
+        pipelineInfo.renderPass = VK_NULL_HANDLE;
         pipelineInfo.subpass = 0;
         pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
@@ -260,55 +188,6 @@ private:
 
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
-    }
-
-    std::vector<char> compileShader(const char* shaderCode, const char* shaderType) {
-        std::vector<char> spirvCode;
-
-        std::string filename = std::string("temp_") + shaderType + ".glsl";
-        std::ofstream file(filename);
-        file << shaderCode;
-        file.close();
-
-        std::string stage = (std::string(shaderType) == "vertex") ? "vert" : "frag";
-        std::string command = "glslc -fshader-stage=" + stage + " " + filename + " -o temp.spv";
-        system(command.c_str());
-
-        std::ifstream spirvFile("temp.spv", std::ios::ate | std::ios::binary);
-        if (spirvFile.is_open()) {
-            size_t fileSize = (size_t)spirvFile.tellg();
-            spirvCode.resize(fileSize);
-            spirvFile.seekg(0);
-            spirvFile.read(spirvCode.data(), fileSize);
-            spirvFile.close();
-        }
-
-        remove(filename.c_str());
-        remove("temp.spv");
-
-        return spirvCode;
-    }
-
-    void createFramebuffers() {
-        VkDevice device = m_context.getDevice();
-        const auto& imageViews = m_swapchain.getImageViews();
-        VkExtent2D extent = m_swapchain.getExtent();
-
-        m_swapChainFramebuffers.resize(imageViews.size());
-        for (size_t i = 0; i < imageViews.size(); i++) {
-            VkImageView attachments[] = { imageViews[i] };
-
-            VkFramebufferCreateInfo framebufferInfo{};
-            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            framebufferInfo.renderPass = m_renderPass;
-            framebufferInfo.attachmentCount = 1;
-            framebufferInfo.pAttachments = attachments;
-            framebufferInfo.width = extent.width;
-            framebufferInfo.height = extent.height;
-            framebufferInfo.layers = 1;
-
-            VK_CHECK(vkCreateFramebuffer(device, &framebufferInfo, nullptr, &m_swapChainFramebuffers[i]));
-        }
     }
 
     void createCommandPool() {
@@ -334,44 +213,100 @@ private:
         VK_CHECK(vkAllocateCommandBuffers(m_context.getDevice(), &allocInfo, m_commandBuffers.data()));
     }
 
+    void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
+        VkImageLayout oldLayout, VkImageLayout newLayout) {
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = oldLayout;
+        barrier.newLayout = newLayout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+
+        VkPipelineStageFlags srcStage;
+        VkPipelineStageFlags dstStage;
+
+        if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        }
+        else if (oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+            barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            barrier.dstAccessMask = 0;
+            srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        }
+        else {
+            throw std::runtime_error("unsupported image layout transition!");
+        }
+
+        vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0,
+            0, nullptr,
+            0, nullptr,
+            1, &barrier);
+    }
+
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
         VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
 
-        VkRenderPassBeginInfo renderPassInfo{};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = m_renderPass;
-        renderPassInfo.framebuffer = m_swapChainFramebuffers[imageIndex];
-        renderPassInfo.renderArea.offset = { 0, 0 };
-        renderPassInfo.renderArea.extent = m_swapchain.getExtent();
+        VkImage swapchainImage = m_swapchain.getImages()[imageIndex];
+        VkExtent2D extent = m_swapchain.getExtent();
 
-        VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
-        renderPassInfo.clearValueCount = 1;
-        renderPassInfo.pClearValues = &clearColor;
+        transitionImageLayout(commandBuffer, swapchainImage,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-        vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        VkRenderingAttachmentInfo colorAttachment{};
+        colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        colorAttachment.imageView = m_swapchain.getImageViews()[imageIndex];
+        colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colorAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachment.clearValue = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+
+        VkRenderingInfo renderingInfo{};
+        renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        renderingInfo.renderArea = { {0, 0}, extent };
+        renderingInfo.layerCount = 1;
+        renderingInfo.colorAttachmentCount = 1;
+        renderingInfo.pColorAttachments = &colorAttachment;
+
+        vkCmdBeginRendering(commandBuffer, &renderingInfo);
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
 
         VkViewport viewport{};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
-        viewport.width = static_cast<float>(m_swapchain.getExtent().width);
-        viewport.height = static_cast<float>(m_swapchain.getExtent().height);
+        viewport.width = static_cast<float>(extent.width);
+        viewport.height = static_cast<float>(extent.height);
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
         VkRect2D scissor{};
         scissor.offset = { 0, 0 };
-        scissor.extent = m_swapchain.getExtent();
+        scissor.extent = extent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
-        vkCmdEndRenderPass(commandBuffer);
+        vkCmdEndRendering(commandBuffer);
+
+        transitionImageLayout(commandBuffer, swapchainImage,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
         VK_CHECK(vkEndCommandBuffer(commandBuffer));
     }
@@ -467,17 +402,10 @@ private:
             vkDestroyCommandPool(device, m_commandPool, nullptr);
             m_commandPool = VK_NULL_HANDLE;
 
-            for (VkFramebuffer framebuffer : m_swapChainFramebuffers) {
-                vkDestroyFramebuffer(device, framebuffer, nullptr);
-            }
-            m_swapChainFramebuffers.clear();
-
             vkDestroyPipeline(device, m_graphicsPipeline, nullptr);
             m_graphicsPipeline = VK_NULL_HANDLE;
             vkDestroyPipelineLayout(device, m_pipelineLayout, nullptr);
             m_pipelineLayout = VK_NULL_HANDLE;
-            vkDestroyRenderPass(device, m_renderPass, nullptr);
-            m_renderPass = VK_NULL_HANDLE;
 
             m_swapchain.cleanup(device);
         }

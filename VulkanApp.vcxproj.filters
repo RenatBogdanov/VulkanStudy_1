@@ -32,6 +32,15 @@
     <None Include="README.md">
       <Filter>Исходные файлы</Filter>
     </None>
+    <None Include="shaders\triangle.frag">
+      <Filter>Исходные файлы</Filter>
+    </None>
+    <None Include="shaders\triangle.vert">
+      <Filter>Исходные файлы</Filter>
+    </None>
+    <None Include="compile_shaders.bat">
+      <Filter>Исходные файлы</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="VulkanContext.h">

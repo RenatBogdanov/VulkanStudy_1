@@ -149,7 +149,10 @@
     <ClCompile Include="Window.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="compile_shaders.bat" />
     <None Include="README.md" />
+    <None Include="shaders\triangle.frag" />
+    <None Include="shaders\triangle.vert" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Swapchain.h" />
