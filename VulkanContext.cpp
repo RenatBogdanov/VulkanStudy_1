@@ -30,6 +30,7 @@ void VulkanContext::init(Window& window) {
         window.createSurface(m_instance, &m_surface);
         pickPhysicalDevice();
         createLogicalDevice();
+        createAllocator();
     }
     catch (...) {
         cleanup();
@@ -38,6 +39,10 @@ void VulkanContext::init(Window& window) {
 }
 
 void VulkanContext::cleanup() {
+    if (m_allocator != VK_NULL_HANDLE) {
+        vmaDestroyAllocator(m_allocator);
+        m_allocator = VK_NULL_HANDLE;
+    }
     if (m_device != VK_NULL_HANDLE) {
         vkDestroyDevice(m_device, nullptr);
         m_device = VK_NULL_HANDLE;
@@ -214,17 +219,20 @@ void VulkanContext::createLogicalDevice() {
     createInfo.pEnabledFeatures = nullptr;
     createInfo.enabledExtensionCount = static_cast<uint32_t>(DEVICE_EXTENSIONS.size());
     createInfo.ppEnabledExtensionNames = DEVICE_EXTENSIONS.data();
-
-    if (ENABLE_VALIDATION_LAYERS) {
-        createInfo.enabledLayerCount = static_cast<uint32_t>(VALIDATION_LAYERS.size());
-        createInfo.ppEnabledLayerNames = VALIDATION_LAYERS.data();
-    }
-    else {
-        createInfo.enabledLayerCount = 0;
-    }
+    // Слои валидации на уровне VkDevice не включаются
 
     VK_CHECK(vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device));
 
     vkGetDeviceQueue(m_device, indices.graphicsFamily.value(), 0, &m_graphicsQueue);
     vkGetDeviceQueue(m_device, indices.presentFamily.value(), 0, &m_presentQueue);
 }
+
+void VulkanContext::createAllocator() {
+    VmaAllocatorCreateInfo allocatorInfo{};
+    allocatorInfo.physicalDevice = m_physicalDevice;
+    allocatorInfo.device = m_device;
+    allocatorInfo.instance = m_instance;
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+
+    VK_CHECK(vmaCreateAllocator(&allocatorInfo, &m_allocator));
+}   

@@ -1,7 +1,13 @@
+// Обязательные макросы GLM должны быть объявлены до включения заголовка
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+
 #include "Swapchain.h"
 #include "VulkanContext.h"
 #include "VulkanUtils.h"
 #include "Window.h"
+
+#include <glm/glm.hpp>
 
 #include <cstdlib>
 #include <fstream>
@@ -42,15 +48,34 @@ private:
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkFence> m_inFlightFences;
 
+    // Тестовый буфер VMA
+    VkBuffer m_testBuffer = VK_NULL_HANDLE;
+    VmaAllocation m_testAllocation = VK_NULL_HANDLE;
+
     uint32_t m_currentFrame = 0;
 
     void initVulkan() {
         m_context.init(m_window);
         m_swapchain.init(m_context, m_window);
+        createTestBuffer();
         createGraphicsPipeline();
         createCommandPool();
         createCommandBuffers();
         createSyncObjects();
+    }
+
+    void createTestBuffer() {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = 1024;
+        bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        VK_CHECK(vmaCreateBuffer(m_context.getAllocator(), &bufferInfo, &allocInfo,
+            &m_testBuffer, &m_testAllocation, nullptr));
     }
 
     std::vector<char> readFile(const std::string& filename) {
@@ -266,6 +291,9 @@ private:
             VK_IMAGE_LAYOUT_UNDEFINED,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
+        // Визуальная проверка интеграции GLM: используем glm::vec3 для цвета очистки
+        glm::vec3 bgColor(0.05f, 0.08f, 0.15f);
+
         VkRenderingAttachmentInfo colorAttachment{};
         colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         colorAttachment.imageView = m_swapchain.getImageViews()[imageIndex];
@@ -273,7 +301,7 @@ private:
         colorAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
         colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachment.clearValue = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+        colorAttachment.clearValue = { {{bgColor.r, bgColor.g, bgColor.b, 1.0f}} };
 
         VkRenderingInfo renderingInfo{};
         renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -388,6 +416,13 @@ private:
         VkDevice device = m_context.getDevice();
         if (device != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(device);
+
+            // Уничтожение тестового буфера VMA
+            if (m_testBuffer != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(m_context.getAllocator(), m_testBuffer, m_testAllocation);
+                m_testBuffer = VK_NULL_HANDLE;
+                m_testAllocation = VK_NULL_HANDLE;
+            }
 
             for (VkSemaphore semaphore : m_imageAvailableSemaphores) {
                 vkDestroySemaphore(device, semaphore, nullptr);

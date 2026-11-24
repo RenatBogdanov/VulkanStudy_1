@@ -3,6 +3,7 @@
 #include "VulkanUtils.h"
 
 #include <vulkan/vulkan.h>
+#include <VMA/vk_mem_alloc.h>
 
 class Window;
 
@@ -12,11 +13,7 @@ public:
     VulkanContext(const VulkanContext&) = delete;
     VulkanContext& operator=(const VulkanContext&) = delete;
 
-    // Порядок: instance -> surface -> physical device -> logical device.
-    // При ошибке на любом шаге уже созданные объекты уничтожаются, исключение пробрасывается дальше.
     void init(Window& window);
-
-    // Порядок уничтожения: device -> surface -> instance. Безопасно вызывать повторно.
     void cleanup();
 
     VkInstance getInstance() const { return m_instance; }
@@ -25,6 +22,7 @@ public:
     VkDevice getDevice() const { return m_device; }
     VkQueue getGraphicsQueue() const { return m_graphicsQueue; }
     VkQueue getPresentQueue() const { return m_presentQueue; }
+    VmaAllocator getAllocator() const { return m_allocator; }
 
     QueueFamilyIndices findQueueFamilies() const { return findQueueFamilies(m_physicalDevice); }
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
@@ -33,6 +31,8 @@ private:
     void createInstance();
     void pickPhysicalDevice();
     void createLogicalDevice();
+    void createAllocator();
+
     bool isDeviceSuitable(VkPhysicalDevice device) const;
     bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
 
@@ -42,4 +42,5 @@ private:
     VkDevice m_device = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VkQueue m_presentQueue = VK_NULL_HANDLE;
+    VmaAllocator m_allocator = VK_NULL_HANDLE; // VMA использует VK_NULL_HANDLE (nullptr) для пустых указателей
 };
