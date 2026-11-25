@@ -1,4 +1,4 @@
-#include "EditorUI.h"
+﻿#include "EditorUI.h"
 #include "VulkanContext.h"
 #include "Window.h"
 #include "Swapchain.h"
@@ -7,11 +7,16 @@
 #include <imgui/imgui.h>
 #include <imgui/imgui_impl_glfw.h>
 #include <imgui/imgui_impl_vulkan.h>
+#include <imguizmo/ImGuizmo.h>
 
 #include <glm/gtc/type_ptr.hpp>
 
+#include <string>
 #include <vector>
 
+// ============================================================
+//  INIT / CLEANUP
+// ============================================================
 void EditorUI::init(VulkanContext& context, Window& window, Swapchain& swapchain) {
     VkDescriptorPoolSize pool_sizes[] = {
         { VK_DESCRIPTOR_TYPE_SAMPLER,                1000 },
@@ -74,6 +79,9 @@ void EditorUI::cleanup(VkDevice device) {
     }
 }
 
+// ============================================================
+//  RENDER
+// ============================================================
 void EditorUI::render(EngineSettings& settings,
     VulkanContext& context,
     Window& window,
@@ -82,9 +90,9 @@ void EditorUI::render(EngineSettings& settings,
     std::vector<SceneObject>& objects,
     EditorActions& actions) {
 
-    // ============================================================
-    //  F2: Stats Overlay
-    // ============================================================
+    (void)gamepadConnected;
+
+    // ---- F2: Stats Overlay ----
     if (settings.showStatsOverlay) {
         ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 10, 10), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
         ImGui::Begin("Stats", &settings.showStatsOverlay,
@@ -96,15 +104,12 @@ void EditorUI::render(EngineSettings& settings,
         ImGui::End();
     }
 
-    // ============================================================
-    //  F1: Main Settings Window
-    // ============================================================
+    // ---- F1: Main Settings Window ----
     if (settings.showMainSettings) {
         ImGui::SetNextWindowSize(ImVec2(450, 500), ImGuiCond_FirstUseEver);
         ImGui::Begin("Settings", &settings.showMainSettings);
 
         if (ImGui::BeginTabBar("SettingsTabs")) {
-            // --- Display Tab ---
             if (ImGui::BeginTabItem("Display")) {
                 ImGui::Text("Active GPU: %s", context.getCurrentGpuName().c_str());
                 const auto& gpus = context.getAvailableGpus();
@@ -121,9 +126,8 @@ void EditorUI::render(EngineSettings& settings,
                         }
                     }
                 }
-                if (settings.gpuChangeHint) {
+                if (settings.gpuChangeHint)
                     ImGui::TextColored(ImVec4(1, 1, 0, 1), "Restart application to apply GPU change");
-                }
 
                 int currentRes = 1;
                 if (settings.renderWidth == 512)  currentRes = 0;
@@ -133,11 +137,8 @@ void EditorUI::render(EngineSettings& settings,
                 else if (settings.renderWidth == 1920) currentRes = 4;
 
                 const char* resolutions[] = {
-                    "512x448 (PS2 NTSC Low)",
-                    "640x448 (PS2 Standard)",
-                    "800x448 (PS2 Widescreen)",
-                    "1280x720 (HD Remaster)",
-                    "1920x1080 (Full HD)"
+                    "512x448 (PS2 NTSC Low)", "640x448 (PS2 Standard)", "800x448 (PS2 Widescreen)",
+                    "1280x720 (HD Remaster)", "1920x1080 (Full HD)"
                 };
                 if (ImGui::Combo("Internal Resolution", &currentRes, resolutions, IM_ARRAYSIZE(resolutions))) {
                     if (currentRes == 0) { settings.renderWidth = 512;  settings.renderHeight = 448; }
@@ -153,19 +154,15 @@ void EditorUI::render(EngineSettings& settings,
                     window.setFullscreen(isFullscreen);
                     actions.requestRecreateSwapchain = true;
                 }
-
                 ImGui::SliderFloat("Camera FOV", &settings.cameraFov, 45.0f, 95.0f);
                 ImGui::EndTabItem();
             }
 
-            // --- Atmosphere & FX Tab ---
             if (ImGui::BeginTabItem("Atmosphere & FX")) {
-                ImGui::Text("Fog");
                 ImGui::Checkbox("Enable Fog", &settings.fogEnabled);
                 ImGui::SliderFloat("Fog Density", &settings.fogDensity, 0.0f, 0.1f);
                 ImGui::ColorEdit3("Fog Color", glm::value_ptr(settings.fogColor));
                 ImGui::Separator();
-                ImGui::Text("Bloom & Color");
                 ImGui::SliderFloat("Bloom Threshold", &settings.ppParams.bloomThreshold, 0.0f, 1.0f);
                 ImGui::SliderFloat("Bloom Intensity", &settings.ppParams.bloomIntensity, 0.0f, 2.0f);
                 ImGui::SliderFloat("Saturation", &settings.ppParams.saturation, 0.0f, 1.5f);
@@ -173,26 +170,21 @@ void EditorUI::render(EngineSettings& settings,
                 ImGui::EndTabItem();
             }
 
-            // --- Lighting Tab ---
             if (ImGui::BeginTabItem("Lighting")) {
-                ImGui::Text("Sun");
                 ImGui::SliderFloat("Sun Azimuth", &settings.sunAzimuth, 0.0f, 6.2832f);
                 ImGui::SliderFloat("Sun Elevation", &settings.sunElevation, 0.0f, 1.5708f);
                 ImGui::SliderFloat("Sun Intensity", &settings.sunIntensity, 0.0f, 3.0f);
                 ImGui::Separator();
-                ImGui::Text("Ambient");
                 ImGui::ColorEdit3("Sky Ambient", glm::value_ptr(settings.skyAmbient));
                 ImGui::ColorEdit3("Ground Ambient", glm::value_ptr(settings.groundAmbient));
                 ImGui::Separator();
-                ImGui::Text("Dynamic Point Light");
-                ImGui::Checkbox("Animate", &settings.animatePointLight);
+                ImGui::Checkbox("Animate Point Light", &settings.animatePointLight);
                 ImGui::SliderFloat("Intensity", &settings.pointLightIntensity, 0.0f, 3.0f);
                 ImGui::SliderFloat("Radius", &settings.pointLightRadius, 1.0f, 20.0f);
                 ImGui::ColorEdit3("Color", glm::value_ptr(settings.pointLightColorBase));
                 ImGui::EndTabItem();
             }
 
-            // --- Fur & Grass Tab ---
             if (ImGui::BeginTabItem("Fur & Grass")) {
                 ImGui::Checkbox("Enable Fur", &settings.furEnabled);
                 ImGui::SliderInt("Shell Count", &settings.shellCount, 4, 32);
@@ -202,46 +194,151 @@ void EditorUI::render(EngineSettings& settings,
                 ImGui::SliderFloat("Fur Gravity", &settings.furGravity, 0.0f, 2.0f);
                 ImGui::EndTabItem();
             }
-
             ImGui::EndTabBar();
         }
 
         ImGui::Separator();
-        if (ImGui::Button("Save Settings")) actions.saveSettings = true;
+        if (ImGui::Button("Save Settings"))  actions.saveSettings = true;
         ImGui::SameLine();
         if (ImGui::Button("Reset Defaults")) actions.resetSettings = true;
-
         ImGui::End();
     }
 
     // ============================================================
-    //  F3: Scene & Camera Window
+    //  F3: Unity-style Hierarchy + Inspector
     // ============================================================
-    if (settings.showSceneWindow) {
-        ImGui::SetNextWindowSize(ImVec2(350, 400), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Scene & Camera", &settings.showSceneWindow);
+    if (!settings.showSceneWindow) return;
 
-        ImGui::Text("Camera");
+    // ---- Гизмо-хоткеи W / E / R ----
+    // Не срабатывают при полёте камеры (ПКМ), при вводе текста и при перетаскивании гизмо.
+    const bool rmbPressed = glfwGetMouseButton(window.getNativeWindow(), GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    if (!rmbPressed && !ImGui::GetIO().WantTextInput && !ImGuizmo::IsUsing()) {
+        if (ImGui::IsKeyPressed(ImGuiKey_W)) settings.gizmoOperation = 0; // Translate
+        if (ImGui::IsKeyPressed(ImGuiKey_E)) settings.gizmoOperation = 1; // Rotate
+        if (ImGui::IsKeyPressed(ImGuiKey_R)) settings.gizmoOperation = 2; // Scale
+    }
+
+    // ---- Hierarchy (слева) ----
+    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(290, 520), ImGuiCond_FirstUseEver);
+    ImGui::Begin("Hierarchy", &settings.showSceneWindow);
+
+    if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SliderFloat("Move Speed", &settings.cameraSpeed, 1.0f, 20.0f);
-        if (ImGui::Button("Reset Camera")) {
-            camera.reset();
-        }
-        ImGui::Separator();
+        if (ImGui::Button("Reset Camera")) camera.reset();
+        glm::vec3 cp = camera.getPosition();
+        ImGui::Text("Pos: %.2f  %.2f  %.2f", cp.x, cp.y, cp.z);
+    }
+    ImGui::Separator();
 
-        ImGui::Text("Scene Objects");
-        for (size_t i = 0; i < objects.size(); ++i) {
-            auto& obj = objects[i];
-            ImGui::PushID((int)i);
-            if (ImGui::TreeNode("Object", "Object %d", (int)i)) {
-                if (ImGui::Button("Select")) settings.selectedObjectIndex = (int)i;
-                ImGui::DragFloat3("Position", glm::value_ptr(obj.position), 0.05f);
-                ImGui::DragFloat3("Scale", glm::value_ptr(obj.scale), 0.05f, 0.1f, 20.0f);
-                ImGui::Checkbox("Is Furry", &obj.isFurry);
-                ImGui::TreePop();
-            }
-            ImGui::PopID();
-        }
+    if (ImGui::Button("+ Idol"))   actions.addIdol = true;
+    ImGui::SameLine();
+    if (ImGui::Button("+ Pillar")) actions.addPillar = true;
+    ImGui::SameLine();
+    if (ImGui::Button("Save Scene")) actions.saveScene = true;
+    ImGui::SameLine();
+    if (ImGui::Button("Load Scene")) actions.loadScene = true;
 
-        ImGui::End();
+    const bool hasSelection = settings.selectedObjectIndex >= 0 &&
+        settings.selectedObjectIndex < (int)objects.size();
+
+    ImGui::BeginDisabled(!hasSelection);
+    if (ImGui::Button("Duplicate")) actions.duplicateObject = true;
+    ImGui::SameLine();
+    if (ImGui::Button("Delete"))    actions.deleteObject = true;
+    ImGui::EndDisabled();
+
+    if (hasSelection && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D))
+        actions.duplicateObject = true;
+    if (hasSelection && !ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Delete))
+        actions.deleteObject = true;
+
+    ImGui::Separator();
+
+    for (size_t i = 0; i < objects.size(); ++i) {
+        if (objects[i].isLightMarker) continue;
+        ImGui::PushID((int)i);
+        const bool isSelected = (settings.selectedObjectIndex == (int)i);
+        if (ImGui::Selectable(objects[i].name.c_str(), isSelected))
+            settings.selectedObjectIndex = (int)i;
+        ImGui::PopID();
+    }
+
+    ImGui::End();
+
+    // ---- Inspector (справа) ----
+    if (!hasSelection) return;
+
+    SceneObject& obj = objects[settings.selectedObjectIndex];
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 320, 10), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(310, 460), ImGuiCond_FirstUseEver);
+    ImGui::Begin("Inspector");
+
+    // Zero-init + string::copy: без C4996 и без риска переполнения.
+    char nameBuf[256] = {};
+    obj.name.copy(nameBuf, sizeof(nameBuf) - 1);
+    if (ImGui::InputText("Name", nameBuf, sizeof(nameBuf)))
+        obj.name = nameBuf;
+
+    ImGui::Separator();
+    ImGui::Text("Transform");
+    ImGui::DragFloat3("Position", glm::value_ptr(obj.position), 0.05f);
+    ImGui::DragFloat3("Rotation", glm::value_ptr(obj.rotation), 0.5f);
+    ImGui::DragFloat3("Scale", glm::value_ptr(obj.scale), 0.05f, 0.01f, 100.0f);
+
+    ImGui::Separator();
+    ImGui::Text("Properties");
+    ImGui::Checkbox("Is Furry", &obj.isFurry);
+    ImGui::Checkbox("Rotate", &obj.isRotating);
+    ImGui::SliderFloat("Emissive", &obj.emissive, 0.0f, 2.0f);
+
+    ImGui::Separator();
+    const char* opNames[] = { "Translate", "Rotate", "Scale" };
+    ImGui::Combo("Gizmo", &settings.gizmoOperation, opNames, IM_ARRAYSIZE(opNames));
+    ImGui::TextDisabled("Hotkeys: W / E / R");
+
+    ImGui::End();
+
+    // ============================================================
+    //  3D Gizmo
+    // ============================================================
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
+    const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+    ImGuizmo::SetRect(0, 0, displaySize.x, displaySize.y);
+
+    glm::mat4 view = camera.getViewMatrix();
+    // Чистая projection БЕЗ Y-flip — ImGuizmo ждёт OpenGL-style NDC и сам
+    // делает (1 - ndc.y)/2. Рендер-путь продолжает использовать Y-flipped proj.
+    glm::mat4 proj = glm::perspective(glm::radians(settings.cameraFov),
+        static_cast<float>(settings.renderWidth) / static_cast<float>(settings.renderHeight),
+        0.1f, 100.0f);
+
+    glm::mat4 model = obj.getModelMatrix();
+
+    // ВАЖНО: gizmoOperation — это ИНДЕКС (0/1/2) для Combo.
+    // ImGuizmo::OPERATION — битовые флаги (TRANSLATE=1, ROTATE=2, SCALE=4).
+    // Прямой static_cast даёт сдвиг на один: E → TRANSLATE, R → ROTATE, W → пусто.
+    ImGuizmo::OPERATION op = ImGuizmo::TRANSLATE;
+    switch (settings.gizmoOperation) {
+    case 1:  op = ImGuizmo::ROTATE; break;
+    case 2:  op = ImGuizmo::SCALE;  break;
+    default: op = ImGuizmo::TRANSLATE; break;
+    }
+
+    ImGuizmo::Manipulate(
+        glm::value_ptr(view),
+        glm::value_ptr(proj),
+        op,
+        ImGuizmo::MODE::WORLD,
+        glm::value_ptr(model));
+
+    if (ImGuizmo::IsUsing()) {
+        float t[3], r[3], s[3];
+        ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(model), t, r, s);
+        obj.position = glm::vec3(t[0], t[1], t[2]);
+        obj.rotation = glm::vec3(r[0], r[1], r[2]);
+        obj.scale = glm::vec3(s[0], s[1], s[2]);
     }
 }

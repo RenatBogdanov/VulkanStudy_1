@@ -1,9 +1,11 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 // ============================================================
 //  PUSH CONSTANTS (Instanced fur)
@@ -19,20 +21,20 @@ static_assert(offsetof(PushConstants, furShellCount) == 64, "furShellCount offse
 static_assert(offsetof(PushConstants, emissive) == 68, "emissive offset must match GLSL layout");
 
 // ============================================================
-//  SCENE UBO Ч std140, 272 байта
+//  SCENE UBO Ч std140, 272 bytes
 // ============================================================
 struct SceneUBO {
     glm::mat4 viewProj;              // offset   0
     glm::mat4 view;                  // offset  64
-    glm::vec4 fogColorDensity;       // offset 128 (rgb = color, a = density)
-    glm::vec4 furParams;             // offset 144 (x=time, y=furLength, z=furDensity, w=slopeThreshold)
-    glm::vec4 furGravity;            // offset 160 (x=furGravity)
-    glm::vec4 sunDirection;          // offset 176 (xyz = normalized dir to sun)
-    glm::vec4 sunColor;              // offset 192 (rgb = sun color)
-    glm::vec4 skyAmbientColor;       // offset 208 (rgb = sky hemisphere ambient)
-    glm::vec4 groundAmbientColor;    // offset 224 (rgb = ground hemisphere ambient)
-    glm::vec4 pointLightPos;         // offset 240 (xyz = world pos, w = falloff radius)
-    glm::vec4 pointLightColor;       // offset 256 (rgb = tint * intensity)
+    glm::vec4 fogColorDensity;       // offset 128
+    glm::vec4 furParams;             // offset 144
+    glm::vec4 furGravity;            // offset 160
+    glm::vec4 sunDirection;          // offset 176
+    glm::vec4 sunColor;              // offset 192
+    glm::vec4 skyAmbientColor;       // offset 208
+    glm::vec4 groundAmbientColor;    // offset 224
+    glm::vec4 pointLightPos;         // offset 240
+    glm::vec4 pointLightColor;       // offset 256
 };
 static_assert(sizeof(SceneUBO) == 272, "SceneUBO must be 272 bytes for std140 layout");
 
@@ -50,12 +52,26 @@ struct PostProcessParams {
 //  SCENE OBJECT
 // ============================================================
 struct SceneObject {
-    glm::vec3 position{};
-    glm::vec3 scale{ 1.0f };
-    bool      isRotating{ false };
-    bool      useIdolMesh{ false };
-    bool      isFurry{ false };
-    float     emissive{ 0.0f };
+    std::string name = "Object";
+    glm::vec3   position{};
+    glm::vec3   rotation{ 0.0f };      // Euler angles in degrees (XYZ order)
+    glm::vec3   scale{ 1.0f };
+    bool        isRotating{ false };
+    bool        useIdolMesh{ false };
+    bool        isFurry{ false };
+    bool        isLightMarker{ false }; // animated point-light proxy, non-editable
+    float       emissive{ 0.0f };
+
+    // јвторитетна€ сборка матрицы модели (T * Rz * Ry * Rx * S Ч XYZ Euler).
+    // »спользуетс€ и в OffscreenRenderer, и в ImGuizmo, чтобы гизмо точно совпадало с мешем.
+    glm::mat4 getModelMatrix() const {
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), position);
+        model = glm::rotate(model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+        model = glm::rotate(model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+        model = glm::rotate(model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+        model = glm::scale(model, scale);
+        return model;
+    }
 };
 
 // ============================================================
@@ -71,9 +87,10 @@ struct EngineSettings {
     float cameraFov = 45.0f;
     float cameraSpeed = 5.0f;
 
-    // --- Selection ---
+    // --- Selection / Gizmo ---
     int hoveredObjectIndex = -1;
     int selectedObjectIndex = -1;
+    int gizmoOperation = 0;   // 0=Translate, 1=Rotate, 2=Scale
 
     // --- GPU selection ---
     int  selectedGpuIndex = 0;

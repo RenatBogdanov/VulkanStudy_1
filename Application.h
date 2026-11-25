@@ -14,6 +14,7 @@
 #include <vulkan/vulkan.h>
 #include <vma/vk_mem_alloc.h>
 
+#include <string>
 #include <vector>
 
 class Application {
@@ -29,10 +30,13 @@ private:
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
     void initVulkan();
-    void initScene();
     void mainLoop();
     void drawFrame(float deltaTime);
     void cleanup();
+
+    void initDefaultScene();
+    void loadScene(const std::string& path);
+    void saveScene(const std::string& path) const;
 
     void loadSettings();
     void saveSettings();
@@ -46,6 +50,8 @@ private:
     void waitForFramebuffer();
 
     void updatePointLightAnimation(float time);
+
+    void handleEditorActions(const EditorActions& actions);
 
     Window            m_window;
     VulkanContext     m_context;

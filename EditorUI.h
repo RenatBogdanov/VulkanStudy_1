@@ -15,6 +15,14 @@ struct EditorActions {
     bool requestRecreateOffscreen = false;
     bool saveSettings = false;
     bool resetSettings = false;
+
+    // Scene editing
+    bool saveScene = false;
+    bool loadScene = false;
+    bool deleteObject = false;
+    bool duplicateObject = false;
+    bool addIdol = false;
+    bool addPillar = false;
 };
 
 class EditorUI {

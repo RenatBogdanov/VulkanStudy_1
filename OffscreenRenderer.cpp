@@ -607,7 +607,7 @@ void OffscreenRenderer::fillUbo(const EngineSettings& settings, float time,
     ubo.view = view;
     ubo.fogColorDensity = glm::vec4(settings.fogColor, settings.fogEnabled ? settings.fogDensity : 0.0f);
     ubo.furParams = glm::vec4(time, settings.furLength, settings.furDensity, settings.slopeThreshold);
-    ubo.furGravity = glm::vec4(settings.furGravity, 0.0f, 0.0f, 0.0f); // <-- Передача гравитации
+    ubo.furGravity = glm::vec4(settings.furGravity, 0.0f, 0.0f, 0.0f);
     ubo.sunDirection = glm::vec4(glm::normalize(sunDir), 0.0f);
     ubo.sunColor = glm::vec4(glm::vec3(1.0f, 0.95f, 0.90f) * settings.sunIntensity, 1.0f);
     ubo.skyAmbientColor = glm::vec4(settings.skyAmbient, 1.0f);
@@ -643,7 +643,13 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue = { {{ settings.fogColor.r, settings.fogColor.g, settings.fogColor.b, 1.0f }} };
+    // sRGB -> linear: фон не светлеет после финальной гаммы Swapchain.
+    colorAttachment.clearValue = { {{
+        std::pow(settings.fogColor.r, 2.2f),
+        std::pow(settings.fogColor.g, 2.2f),
+        std::pow(settings.fogColor.b, 2.2f),
+        1.0f
+    }} };
 
     VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
     depthAttachment.imageView = m_depthImageView;
@@ -675,11 +681,18 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
     for (const auto& obj : objects) {
+        // Ротация из инспектора/гизмо живёт в obj.rotation;
+        // isRotating добавляет анимацию (по абсолютному времени), не затирая её.
+        glm::vec3 rot = obj.rotation;
+        if (obj.isRotating)
+            rot.y += time * 45.0f;
+
+        // Единая сборка модели (T * Rz * Ry * Rx * S) — та же, что видит ImGuizmo.
         glm::mat4 model = glm::translate(glm::mat4(1.0f), obj.position);
+        model = glm::rotate(model, glm::radians(rot.z), glm::vec3(0.0f, 0.0f, 1.0f));
+        model = glm::rotate(model, glm::radians(rot.y), glm::vec3(0.0f, 1.0f, 0.0f));
+        model = glm::rotate(model, glm::radians(rot.x), glm::vec3(1.0f, 0.0f, 0.0f));
         model = glm::scale(model, obj.scale);
-        if (obj.isRotating) {
-            model = glm::rotate(model, time * glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        }
 
         uint32_t shells = (settings.furEnabled && obj.isFurry)
             ? static_cast<uint32_t>(settings.shellCount)

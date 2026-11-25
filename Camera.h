@@ -12,13 +12,12 @@ public:
     glm::mat4 getViewMatrix() const;
     void processKeyboard(GLFWwindow* window, float deltaTime);
     void processMouseMovement(float xOffset, float yOffset);
-
-    // Новый метод для работы ввода с геймпада
-    void processGamepad(const glm::vec2& leftStick, const glm::vec2& rightStick, float leftTrigger, float rightTrigger, float deltaTime);
+    void processGamepad(const glm::vec2& leftStick, const glm::vec2& rightStick,
+        float leftTrigger, float rightTrigger, float deltaTime);
 
     glm::vec3 getPosition() const { return m_position; }
+    glm::vec3 getFront()    const { return m_front; }
 
-    // Новые методы для EditorUI и Application
     void setSpeed(float speed);
     void reset();
 
