@@ -1,4 +1,4 @@
-#include "OffscreenRenderer.h"
+п»ї#include "OffscreenRenderer.h"
 #include "Mesh.h"
 #include "Texture.h"
 #include "Swapchain.h"
@@ -20,30 +20,38 @@
 
 void OffscreenRenderer::init(VulkanContext& context, VkFormat swapchainFormat,
     VkCommandPool commandPool,
-    Mesh* cubeMesh, Mesh* idolMesh, Texture* texture,
+    Mesh* cubeMesh, Mesh* idolMesh, Mesh* waterfallMesh, Mesh* wormMesh, Texture* texture,
     uint32_t initialWidth, uint32_t initialHeight) {
     (void)commandPool;
 
     m_cubeMesh = cubeMesh;
     m_idolMesh = idolMesh;
+    m_waterfallMesh = waterfallMesh;
+    m_wormMesh = wormMesh;
     m_texture = texture;
     m_renderWidth = initialWidth;
     m_renderHeight = initialHeight;
 
     createOffscreenResources(context);
     createDepthResources(context);
-
     createUniformBuffer(context);
+    createWormBuffer(context);
 
     createSceneDescriptorSetLayout(context);
     createSceneDescriptorPool(context);
     createSceneDescriptorSet(context);
+
+    createWormDescriptorSetLayout(context);
+    createWormDescriptorPool(context);
+    createWormDescriptorSet(context);
 
     createPostProcessDescriptorSetLayout(context);
     createPostProcessDescriptorPool(context);
     createPostProcessDescriptorSet(context);
 
     createGraphicsPipeline(context);
+    createWaterfallPipeline(context);
+    createWormPipeline(context);
     createPostProcessPipeline(context, swapchainFormat);
 }
 
@@ -52,12 +60,20 @@ void OffscreenRenderer::cleanup(VulkanContext& context) {
     if (device == VK_NULL_HANDLE) return;
 
     if (m_graphicsPipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, m_graphicsPipeline, nullptr);
+    if (m_waterfallPipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, m_waterfallPipeline, nullptr);
+    if (m_wormPipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, m_wormPipeline, nullptr);
     if (m_postProcessPipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, m_postProcessPipeline, nullptr);
+
     if (m_pipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, m_pipelineLayout, nullptr);
+    if (m_wormPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, m_wormPipelineLayout, nullptr);
     if (m_postProcessPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, m_postProcessPipelineLayout, nullptr);
 
     if (m_descriptorPool != VK_NULL_HANDLE) vkDestroyDescriptorPool(device, m_descriptorPool, nullptr);
     if (m_descriptorSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
+
+    if (m_wormDescriptorPool != VK_NULL_HANDLE) vkDestroyDescriptorPool(device, m_wormDescriptorPool, nullptr);
+    if (m_wormDescriptorSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device, m_wormDescriptorSetLayout, nullptr);
+
     if (m_postProcessDescriptorPool != VK_NULL_HANDLE) vkDestroyDescriptorPool(device, m_postProcessDescriptorPool, nullptr);
     if (m_postProcessDescriptorSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device, m_postProcessDescriptorSetLayout, nullptr);
 
@@ -71,12 +87,20 @@ void OffscreenRenderer::cleanup(VulkanContext& context) {
     if (m_sceneUboMapped) vmaUnmapMemory(context.getAllocator(), m_sceneUboAllocation);
     if (m_sceneUboBuffer != VK_NULL_HANDLE) vmaDestroyBuffer(context.getAllocator(), m_sceneUboBuffer, m_sceneUboAllocation);
 
+    if (m_wormInstanceMapped) vmaUnmapMemory(context.getAllocator(), m_wormInstanceAllocation);
+    if (m_wormInstanceBuffer != VK_NULL_HANDLE) vmaDestroyBuffer(context.getAllocator(), m_wormInstanceBuffer, m_wormInstanceAllocation);
+
     m_graphicsPipeline = VK_NULL_HANDLE;
+    m_waterfallPipeline = VK_NULL_HANDLE;
+    m_wormPipeline = VK_NULL_HANDLE;
     m_postProcessPipeline = VK_NULL_HANDLE;
     m_pipelineLayout = VK_NULL_HANDLE;
+    m_wormPipelineLayout = VK_NULL_HANDLE;
     m_postProcessPipelineLayout = VK_NULL_HANDLE;
     m_descriptorPool = VK_NULL_HANDLE;
     m_descriptorSetLayout = VK_NULL_HANDLE;
+    m_wormDescriptorPool = VK_NULL_HANDLE;
+    m_wormDescriptorSetLayout = VK_NULL_HANDLE;
     m_postProcessDescriptorPool = VK_NULL_HANDLE;
     m_postProcessDescriptorSetLayout = VK_NULL_HANDLE;
     m_offscreenSampler = VK_NULL_HANDLE;
@@ -89,6 +113,9 @@ void OffscreenRenderer::cleanup(VulkanContext& context) {
     m_sceneUboBuffer = VK_NULL_HANDLE;
     m_sceneUboAllocation = VK_NULL_HANDLE;
     m_sceneUboMapped = nullptr;
+    m_wormInstanceBuffer = VK_NULL_HANDLE;
+    m_wormInstanceAllocation = VK_NULL_HANDLE;
+    m_wormInstanceMapped = nullptr;
 }
 
 void OffscreenRenderer::recreateOffscreen(VulkanContext& context, uint32_t width, uint32_t height) {
@@ -128,6 +155,29 @@ void OffscreenRenderer::createUniformBuffer(VulkanContext& context) {
     VK_CHECK(vmaCreateBuffer(context.getAllocator(), &bufferInfo, &allocInfo,
         &m_sceneUboBuffer, &m_sceneUboAllocation, nullptr));
     VK_CHECK(vmaMapMemory(context.getAllocator(), m_sceneUboAllocation, &m_sceneUboMapped));
+}
+
+void OffscreenRenderer::createWormBuffer(VulkanContext& context) {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = sizeof(WormInstanceData) * m_maxWorms;
+    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    VmaAllocationInfo allocInfoResult;
+    VK_CHECK(vmaCreateBuffer(context.getAllocator(), &bufferInfo, &allocInfo,
+        &m_wormInstanceBuffer, &m_wormInstanceAllocation, &allocInfoResult));
+    m_wormInstanceMapped = allocInfoResult.pMappedData;
+}
+
+void OffscreenRenderer::updateWormInstances(VulkanContext& context, const std::vector<WormInstanceData>& instances) {
+    (void)context;
+    if (instances.empty() || m_wormInstanceMapped == nullptr) return;
+    uint32_t count = std::min((uint32_t)instances.size(), m_maxWorms);
+    memcpy(m_wormInstanceMapped, instances.data(), sizeof(WormInstanceData) * count);
 }
 
 void OffscreenRenderer::createOffscreenResources(VulkanContext& context) {
@@ -281,6 +331,70 @@ void OffscreenRenderer::updateSceneDescriptorSet(VulkanContext& context) {
         descriptorWrites.data(), 0, nullptr);
 }
 
+void OffscreenRenderer::createWormDescriptorSetLayout(VulkanContext& context) {
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorCount = 1;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    bindings[1].binding = 1;
+    bindings[1].descriptorCount = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+    VK_CHECK(vkCreateDescriptorSetLayout(context.getDevice(), &layoutInfo, nullptr, &m_wormDescriptorSetLayout));
+}
+
+void OffscreenRenderer::createWormDescriptorPool(VulkanContext& context) {
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[0].descriptorCount = 1;
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSizes[1].descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+    poolInfo.maxSets = 1;
+    VK_CHECK(vkCreateDescriptorPool(context.getDevice(), &poolInfo, nullptr, &m_wormDescriptorPool));
+}
+
+void OffscreenRenderer::createWormDescriptorSet(VulkanContext& context) {
+    VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    allocInfo.descriptorPool = m_wormDescriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &m_wormDescriptorSetLayout;
+
+    VK_CHECK(vkAllocateDescriptorSets(context.getDevice(), &allocInfo, &m_wormDescriptorSet));
+    updateWormDescriptorSet(context);
+}
+
+void OffscreenRenderer::updateWormDescriptorSet(VulkanContext& context) {
+    VkDescriptorBufferInfo uboInfo{ m_sceneUboBuffer, 0, sizeof(SceneUBO) };
+    VkDescriptorBufferInfo ssboInfo{ m_wormInstanceBuffer, 0, VK_WHOLE_SIZE };
+
+    std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[0].dstSet = m_wormDescriptorSet;
+    descriptorWrites[0].dstBinding = 0;
+    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descriptorWrites[0].descriptorCount = 1;
+    descriptorWrites[0].pBufferInfo = &uboInfo;
+
+    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[1].dstSet = m_wormDescriptorSet;
+    descriptorWrites[1].dstBinding = 1;
+    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptorWrites[1].descriptorCount = 1;
+    descriptorWrites[1].pBufferInfo = &ssboInfo;
+
+    vkUpdateDescriptorSets(context.getDevice(), static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+}
+
 void OffscreenRenderer::createPostProcessDescriptorSetLayout(VulkanContext& context) {
     VkDescriptorSetLayoutBinding samplerLayoutBinding{};
     samplerLayoutBinding.binding = 0;
@@ -417,7 +531,7 @@ void OffscreenRenderer::createGraphicsPipeline(VulkanContext& context) {
     dynamicState.pDynamicStates = dynamicStates.data();
 
     VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstants);
 
@@ -450,6 +564,219 @@ void OffscreenRenderer::createGraphicsPipeline(VulkanContext& context) {
     pipelineInfo.layout = m_pipelineLayout;
 
     VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline));
+
+    vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+}
+
+void OffscreenRenderer::createWaterfallPipeline(VulkanContext& context) {
+    VkDevice device = context.getDevice();
+    auto vertShaderSPV = readFile("shaders/waterfall.vert.spv");
+    auto fragShaderSPV = readFile("shaders/waterfall.frag.spv");
+
+    VkShaderModule vertShaderModule = createShaderModule(context, vertShaderSPV);
+    VkShaderModule fragShaderModule = createShaderModule(context, fragShaderSPV);
+
+    VkPipelineShaderStageCreateInfo vertStageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertStageInfo.module = vertShaderModule;
+    vertStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragStageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragStageInfo.module = fragShaderModule;
+    fragStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = { vertStageInfo, fragStageInfo };
+
+    auto bindingDescription = Vertex::getBindingDescription();
+    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_FALSE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_TRUE;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicState{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PushConstants);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    VkPipelineLayout waterfallLayout;
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &waterfallLayout));
+
+    VkFormat offscreenFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    VkPipelineRenderingCreateInfo pipelineRenderingInfo{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    pipelineRenderingInfo.colorAttachmentCount = 1;
+    pipelineRenderingInfo.pColorAttachmentFormats = &offscreenFormat;
+    pipelineRenderingInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    pipelineInfo.pNext = &pipelineRenderingInfo;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.layout = waterfallLayout;
+
+    VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_waterfallPipeline));
+
+    vkDestroyPipelineLayout(device, waterfallLayout, nullptr);
+
+    vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+}
+
+void OffscreenRenderer::createWormPipeline(VulkanContext& context) {
+    VkDevice device = context.getDevice();
+    auto vertShaderSPV = readFile("shaders/worm.vert.spv");
+    auto fragShaderSPV = readFile("shaders/worm.frag.spv");
+
+    VkShaderModule vertShaderModule = createShaderModule(context, vertShaderSPV);
+    VkShaderModule fragShaderModule = createShaderModule(context, fragShaderSPV);
+
+    VkPipelineShaderStageCreateInfo vertStageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertStageInfo.module = vertShaderModule;
+    vertStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragStageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragStageInfo.module = fragShaderModule;
+    fragStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = { vertStageInfo, fragStageInfo };
+
+    auto bindingDescription = Vertex::getBindingDescription();
+    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicState{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PushConstants);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &m_wormDescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &m_wormPipelineLayout));
+
+    VkFormat offscreenFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    VkPipelineRenderingCreateInfo pipelineRenderingInfo{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    pipelineRenderingInfo.colorAttachmentCount = 1;
+    pipelineRenderingInfo.pColorAttachmentFormats = &offscreenFormat;
+    pipelineRenderingInfo.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    pipelineInfo.pNext = &pipelineRenderingInfo;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.layout = m_wormPipelineLayout;
+
+    VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_wormPipeline));
 
     vkDestroyShaderModule(device, fragShaderModule, nullptr);
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
@@ -607,7 +934,7 @@ void OffscreenRenderer::fillUbo(const EngineSettings& settings, float time,
     ubo.view = view;
     ubo.fogColorDensity = glm::vec4(settings.fogColor, settings.fogEnabled ? settings.fogDensity : 0.0f);
     ubo.furParams = glm::vec4(time, settings.furLength, settings.furDensity, settings.slopeThreshold);
-    ubo.furGravity = glm::vec4(settings.furGravity, 0.0f, 0.0f, 0.0f); // <-- Передача гравитации
+    ubo.furGravity = glm::vec4(settings.furGravity, 0.0f, 0.0f, 0.0f);
     ubo.sunDirection = glm::vec4(glm::normalize(sunDir), 0.0f);
     ubo.sunColor = glm::vec4(glm::vec3(1.0f, 0.95f, 0.90f) * settings.sunIntensity, 1.0f);
     ubo.skyAmbientColor = glm::vec4(settings.skyAmbient, 1.0f);
@@ -643,7 +970,12 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue = { {{ settings.fogColor.r, settings.fogColor.g, settings.fogColor.b, 1.0f }} };
+    colorAttachment.clearValue = { {{
+        std::pow(settings.fogColor.r, 2.2f),
+        std::pow(settings.fogColor.g, 2.2f),
+        std::pow(settings.fogColor.b, 2.2f),
+        1.0f
+    }} };
 
     VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
     depthAttachment.imageView = m_depthImageView;
@@ -660,9 +992,6 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
     renderingInfo.pDepthAttachment = &depthAttachment;
 
     vkCmdBeginRendering(commandBuffer, &renderingInfo);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        m_pipelineLayout, 0, 1, &m_descriptorSet, 0, nullptr);
 
     VkViewport viewport{};
     viewport.width = static_cast<float>(m_renderWidth);
@@ -674,12 +1003,24 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
     scissor.extent = { m_renderWidth, m_renderHeight };
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+    // ============================================================
+    //  пїЅпїЅпїЅпїЅпїЅпїЅ 1: пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+    // ============================================================
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        m_pipelineLayout, 0, 1, &m_descriptorSet, 0, nullptr);
+
     for (const auto& obj : objects) {
+        if (obj.isWaterfall) continue;
+
+        glm::vec3 rot = obj.rotation;
+        if (obj.isRotating) rot.y += time * 45.0f;
+
         glm::mat4 model = glm::translate(glm::mat4(1.0f), obj.position);
+        model = glm::rotate(model, glm::radians(rot.z), glm::vec3(0.0f, 0.0f, 1.0f));
+        model = glm::rotate(model, glm::radians(rot.y), glm::vec3(0.0f, 1.0f, 0.0f));
+        model = glm::rotate(model, glm::radians(rot.x), glm::vec3(1.0f, 0.0f, 0.0f));
         model = glm::scale(model, obj.scale);
-        if (obj.isRotating) {
-            model = glm::rotate(model, time * glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        }
 
         uint32_t shells = (settings.furEnabled && obj.isFurry)
             ? static_cast<uint32_t>(settings.shellCount)
@@ -691,7 +1032,7 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
         pc.emissive = obj.emissive;
 
         vkCmdPushConstants(commandBuffer, m_pipelineLayout,
-            VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
 
         if (obj.useIdolMesh && m_idolMesh) {
             m_idolMesh->bind(commandBuffer);
@@ -702,6 +1043,53 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
             m_cubeMesh->drawInstanced(commandBuffer, shells);
         }
     }
+
+    // ============================================================
+    //  пїЅпїЅпїЅпїЅпїЅпїЅ 1.5: пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ)
+    // ============================================================
+    if (settings.wormsEnabled && settings.wormCount > 0 && m_wormMesh &&
+        m_wormPipeline != VK_NULL_HANDLE &&
+        m_wormPipelineLayout != VK_NULL_HANDLE &&
+        m_wormDescriptorSet != VK_NULL_HANDLE) {
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_wormPipeline);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            m_wormPipelineLayout, 0, 1, &m_wormDescriptorSet, 0, nullptr);
+
+        PushConstants pc{};
+        pc.model = glm::mat4(1.0f);
+        vkCmdPushConstants(commandBuffer, m_wormPipelineLayout,
+            VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+
+        m_wormMesh->bind(commandBuffer);
+        uint32_t count = std::min(static_cast<uint32_t>(settings.wormCount), m_maxWorms);
+        m_wormMesh->drawInstanced(commandBuffer, count);
+    }
+
+    // ============================================================
+    //  пїЅпїЅпїЅпїЅпїЅпїЅ 2: пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+    // ============================================================
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_waterfallPipeline);
+
+    for (const auto& obj : objects) {
+        if (!obj.isWaterfall) continue;
+
+        glm::mat4 model = obj.getModelMatrix();
+
+        PushConstants pc{};
+        pc.model = model;
+        pc.emissive = obj.emissive;
+        pc.waterSpeed = obj.waterfallSpeed;
+        pc.waterFoam = obj.waterfallFoam;
+
+        vkCmdPushConstants(commandBuffer, m_pipelineLayout,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
+
+        if (m_waterfallMesh) {
+            m_waterfallMesh->bind(commandBuffer);
+            m_waterfallMesh->drawInstanced(commandBuffer, 1);
+        }
+    }
+
     vkCmdEndRendering(commandBuffer);
 
     transitionImageLayout(commandBuffer, m_offscreenImage,

@@ -1,35 +1,53 @@
 #pragma once
 
-#include "Buffer.h"
-#include "Vertex.h"
-#include <string>
-#include <vector>
 #include <vulkan/vulkan.h>
+#include <vma/vk_mem_alloc.h>
+#include <glm/glm.hpp>
+#include <vector>
+#include <string>
+
+#include "Vertex.h"
 
 class VulkanContext;
 
 class Mesh {
 public:
     Mesh() = default;
+    ~Mesh() = default;
 
-    // Загружает модель из .obj. Если файл не найден, создает процедурный куб.
-    void loadFromObj(VulkanContext& context, VkCommandPool commandPool, const std::string& filepath);
+    // Запрет копирования
+    Mesh(const Mesh&) = delete;
+    Mesh& operator=(const Mesh&) = delete;
 
-    // Создает примитивный куб (используется как fallback и для колонн)
+    void loadFromObj(VulkanContext& context, VkCommandPool commandPool, const std::string& filename);
     void createProceduralCube(VulkanContext& context, VkCommandPool commandPool);
-
-    void bind(VkCommandBuffer cmd);
-
-    // Обычная отрисовка (1 инстанс)
-    void draw(VkCommandBuffer cmd);
-
-    // Instanced-отрисовка (для слоёв меха: instanceCount = количество шеллов)
-    void drawInstanced(VkCommandBuffer cmd, uint32_t instanceCount);
+    void createProceduralWaterfall(VulkanContext& context, VkCommandPool commandPool);
+    void createProceduralWorm(VulkanContext& context, VkCommandPool commandPool);
 
     void cleanup(VmaAllocator allocator);
 
+    void bind(VkCommandBuffer commandBuffer) const;
+    void draw(VkCommandBuffer commandBuffer) const;
+    void drawInstanced(VkCommandBuffer commandBuffer, uint32_t instanceCount) const;
+
+    // Геттеры для WormSwarmSystem
+    const std::vector<Vertex>& getVertices() const { return m_vertices; }
+    const std::vector<uint32_t>& getIndices() const { return m_indices; }
+
 private:
-    Buffer m_vertexBuffer;
-    Buffer m_indexBuffer;
+    void createVertexBuffer(VulkanContext& context, VkCommandPool commandPool, const std::vector<Vertex>& vertices);
+    void createIndexBuffer(VulkanContext& context, VkCommandPool commandPool, const std::vector<uint32_t>& indices);
+
+    VkBuffer m_vertexBuffer = VK_NULL_HANDLE;
+    VmaAllocation m_vertexBufferAllocation = VK_NULL_HANDLE;
+
+    VkBuffer m_indexBuffer = VK_NULL_HANDLE;
+    VmaAllocation m_indexBufferAllocation = VK_NULL_HANDLE;
+
+    uint32_t m_vertexCount = 0;
     uint32_t m_indexCount = 0;
+
+    // Копии данных в RAM для симуляции (WormSwarmSystem)
+    std::vector<Vertex> m_vertices;
+    std::vector<uint32_t> m_indices;
 };

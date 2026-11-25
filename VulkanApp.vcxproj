@@ -113,7 +113,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(VULKAN_SDK)\Include;D:\Programming\glfw-3.3.9\glfw-3.3.9\include;$(ProjectDir)Dependencies;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(VULKAN_SDK)\Include;D:\Programming\glfw-3.3.9\glfw-3.3.9\include;$(ProjectDir)Dependencies;$(ProjectDir)Dependencies\imguizmo;$(ProjectDir)Dependencies\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/constexpr:steps1000000 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -132,7 +132,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(VULKAN_SDK)\Include;D:\Programming\glfw-3.3.9\glfw-3.3.9\include;$(ProjectDir)Dependencies;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(VULKAN_SDK)\Include;D:\Programming\glfw-3.3.9\glfw-3.3.9\include;$(ProjectDir)Dependencies;$(ProjectDir)Dependencies\imguizmo;$(ProjectDir)Dependencies\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/constexpr:steps1000000 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -148,6 +148,7 @@
     <ClCompile Include="Application.cpp" />
     <ClCompile Include="Buffer.cpp" />
     <ClCompile Include="Camera.cpp" />
+    <ClCompile Include="Dependencies\imguizmo\ImGuizmo.cpp" />
     <ClCompile Include="Dependencies\imgui\imgui.cpp" />
     <ClCompile Include="Dependencies\imgui\imgui_demo.cpp" />
     <ClCompile Include="Dependencies\imgui\imgui_draw.cpp" />
@@ -165,19 +166,27 @@
     <ClCompile Include="VmaUsage.cpp" />
     <ClCompile Include="VulkanContext.cpp" />
     <ClCompile Include="Window.cpp" />
+    <ClCompile Include="WormSwarmSystem.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\src\AGENTS.md" />
+    <None Include="..\src\TASKS.md" />
     <None Include="compile_shaders.bat" />
     <None Include="README.md" />
     <None Include="shaders\postprocess.frag" />
     <None Include="shaders\postprocess.vert" />
     <None Include="shaders\triangle.frag" />
     <None Include="shaders\triangle.vert" />
+    <None Include="shaders\waterfall.frag" />
+    <None Include="shaders\waterfall.vert" />
+    <None Include="shaders\worm.frag" />
+    <None Include="shaders\worm.vert" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Application.h" />
     <ClInclude Include="Buffer.h" />
     <ClInclude Include="Camera.h" />
+    <ClInclude Include="Dependencies\imguizmo\ImGuizmo.h" />
     <ClInclude Include="Dependencies\imgui\imconfig.h" />
     <ClInclude Include="Dependencies\imgui\imgui.h" />
     <ClInclude Include="Dependencies\imgui\imgui_impl_glfw.h" />
@@ -197,6 +206,7 @@
     <ClInclude Include="VulkanContext.h" />
     <ClInclude Include="VulkanUtils.h" />
     <ClInclude Include="Window.h" />
+    <ClInclude Include="WormSwarmSystem.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
