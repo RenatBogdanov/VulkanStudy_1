@@ -22,7 +22,7 @@ void OffscreenRenderer::init(VulkanContext& context, VkFormat swapchainFormat,
     VkCommandPool commandPool,
     Mesh* cubeMesh, Mesh* idolMesh, Texture* texture,
     uint32_t initialWidth, uint32_t initialHeight) {
-    (void)commandPool; // зарезервировано, меши создаютс€ снаружи
+    (void)commandPool;
 
     m_cubeMesh = cubeMesh;
     m_idolMesh = idolMesh;
@@ -30,24 +30,19 @@ void OffscreenRenderer::init(VulkanContext& context, VkFormat swapchainFormat,
     m_renderWidth = initialWidth;
     m_renderHeight = initialHeight;
 
-    // 1. —начала изображени€ и сэмплеры Ч они нужны дл€ дескрипторов пост-обработки
     createOffscreenResources(context);
     createDepthResources(context);
 
-    // 2. UBO
     createUniformBuffer(context);
 
-    // 3. ƒескрипторы сцены
     createSceneDescriptorSetLayout(context);
     createSceneDescriptorPool(context);
     createSceneDescriptorSet(context);
 
-    // 4. ƒескрипторы пост-обработки (используют уже созданные m_offscreenImageView / m_offscreenSampler)
     createPostProcessDescriptorSetLayout(context);
     createPostProcessDescriptorPool(context);
     createPostProcessDescriptorSet(context);
 
-    // 5. ѕайплайны
     createGraphicsPipeline(context);
     createPostProcessPipeline(context, swapchainFormat);
 }
@@ -121,9 +116,6 @@ void OffscreenRenderer::recreateOffscreen(VulkanContext& context, uint32_t width
     updatePostProcessDescriptorSet(context);
 }
 
-// ============================================================
-//  BUFFERS
-// ============================================================
 void OffscreenRenderer::createUniformBuffer(VulkanContext& context) {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -138,9 +130,6 @@ void OffscreenRenderer::createUniformBuffer(VulkanContext& context) {
     VK_CHECK(vmaMapMemory(context.getAllocator(), m_sceneUboAllocation, &m_sceneUboMapped));
 }
 
-// ============================================================
-//  OFFSCREEN IMAGE / DEPTH
-// ============================================================
 void OffscreenRenderer::createOffscreenResources(VulkanContext& context) {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -217,9 +206,6 @@ void OffscreenRenderer::createDepthResources(VulkanContext& context) {
     VK_CHECK(vkCreateImageView(context.getDevice(), &viewInfo, nullptr, &m_depthImageView));
 }
 
-// ============================================================
-//  DESCRIPTORS Ч SCENE
-// ============================================================
 void OffscreenRenderer::createSceneDescriptorSetLayout(VulkanContext& context) {
     std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
     bindings[0].binding = 0;
@@ -295,9 +281,6 @@ void OffscreenRenderer::updateSceneDescriptorSet(VulkanContext& context) {
         descriptorWrites.data(), 0, nullptr);
 }
 
-// ============================================================
-//  DESCRIPTORS Ч POST-PROCESS
-// ============================================================
 void OffscreenRenderer::createPostProcessDescriptorSetLayout(VulkanContext& context) {
     VkDescriptorSetLayoutBinding samplerLayoutBinding{};
     samplerLayoutBinding.binding = 0;
@@ -349,9 +332,6 @@ void OffscreenRenderer::updatePostProcessDescriptorSet(VulkanContext& context) {
     vkUpdateDescriptorSets(context.getDevice(), 1, &descriptorWrite, 0, nullptr);
 }
 
-// ============================================================
-//  SHADERS
-// ============================================================
 std::vector<char> OffscreenRenderer::readFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
     if (!file.is_open()) throw std::runtime_error("failed to open file: " + filename);
@@ -373,9 +353,6 @@ VkShaderModule OffscreenRenderer::createShaderModule(VulkanContext& context, con
     return shaderModule;
 }
 
-// ============================================================
-//  GRAPHICS PIPELINE (main pass)
-// ============================================================
 void OffscreenRenderer::createGraphicsPipeline(VulkanContext& context) {
     VkDevice device = context.getDevice();
     auto vertShaderSPV = readFile("shaders/triangle.vert.spv");
@@ -478,9 +455,6 @@ void OffscreenRenderer::createGraphicsPipeline(VulkanContext& context) {
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
-// ============================================================
-//  POST-PROCESS PIPELINE
-// ============================================================
 void OffscreenRenderer::createPostProcessPipeline(VulkanContext& context, VkFormat swapchainFormat) {
     VkDevice device = context.getDevice();
     auto vertShaderSPV = readFile("shaders/postprocess.vert.spv");
@@ -573,9 +547,6 @@ void OffscreenRenderer::createPostProcessPipeline(VulkanContext& context, VkForm
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
-// ============================================================
-//  LAYOUT TRANSITIONS
-// ============================================================
 void OffscreenRenderer::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
     VkImageLayout oldLayout, VkImageLayout newLayout,
     VkImageAspectFlags aspectMask) {
@@ -623,9 +594,6 @@ void OffscreenRenderer::transitionImageLayout(VkCommandBuffer cmd, VkImage image
     vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
-// ============================================================
-//  UBO FILL
-// ============================================================
 void OffscreenRenderer::fillUbo(const EngineSettings& settings, float time,
     const glm::mat4& view, const glm::mat4& proj) {
     glm::vec3 sunDir(
@@ -639,6 +607,7 @@ void OffscreenRenderer::fillUbo(const EngineSettings& settings, float time,
     ubo.view = view;
     ubo.fogColorDensity = glm::vec4(settings.fogColor, settings.fogEnabled ? settings.fogDensity : 0.0f);
     ubo.furParams = glm::vec4(time, settings.furLength, settings.furDensity, settings.slopeThreshold);
+    ubo.furGravity = glm::vec4(settings.furGravity, 0.0f, 0.0f, 0.0f); // <-- ѕередача гравитации
     ubo.sunDirection = glm::vec4(glm::normalize(sunDir), 0.0f);
     ubo.sunColor = glm::vec4(glm::vec3(1.0f, 0.95f, 0.90f) * settings.sunIntensity, 1.0f);
     ubo.skyAmbientColor = glm::vec4(settings.skyAmbient, 1.0f);
@@ -649,9 +618,6 @@ void OffscreenRenderer::fillUbo(const EngineSettings& settings, float time,
     memcpy(m_sceneUboMapped, &ubo, sizeof(ubo));
 }
 
-// ============================================================
-//  RECORD COMMAND BUFFER
-// ============================================================
 void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
     Swapchain& swapchain,
     uint32_t imageIndex,
@@ -665,7 +631,6 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
     VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
 
-    // --- PASS 1: scene -> offscreen ---
     transitionImageLayout(commandBuffer, m_offscreenImage,
         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         VK_IMAGE_ASPECT_COLOR_BIT);
@@ -709,7 +674,6 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
     scissor.extent = { m_renderWidth, m_renderHeight };
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    // === Instanced fur: один vkCmdDrawIndexed на объект ===
     for (const auto& obj : objects) {
         glm::mat4 model = glm::translate(glm::mat4(1.0f), obj.position);
         model = glm::scale(model, obj.scale);
@@ -744,7 +708,6 @@ void OffscreenRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer,
         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_IMAGE_ASPECT_COLOR_BIT);
 
-    // --- PASS 2: post-process + ImGui -> swapchain ---
     VkImage swapchainImage = swapchain.getImages()[imageIndex];
     VkExtent2D swapExtent = swapchain.getExtent();
 

@@ -162,6 +162,7 @@ void EditorUI::render(EngineSettings& settings,
     ImGui::SliderFloat("Fur Length", &settings.furLength, 0.02f, 0.5f);
     ImGui::SliderFloat("Fur Density", &settings.furDensity, 20.0f, 400.0f);
     ImGui::SliderFloat("Slope Threshold", &settings.slopeThreshold, -1.0f, 0.95f);
+    ImGui::SliderFloat("Fur Gravity", &settings.furGravity, 0.0f, 2.0f); // <-- Новый слайдер
 
     // --- Lighting ---
     ImGui::Separator();

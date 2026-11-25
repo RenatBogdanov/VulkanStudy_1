@@ -14,20 +14,21 @@ layout(location = 4) out float vSlopeMask;
 layout(binding = 1) uniform SceneUBO {
     mat4 viewProj;
     mat4 view;
-    vec4 fogColorDensity;      // rgb = fog color, a = density
-    vec4 furParams;            // x = time, y = furLength, z = furDensity, w = slopeThreshold
-    vec4 sunDirection;         // xyz = normalized direction TO sun, w unused
-    vec4 sunColor;             // rgb = sun color, a unused
-    vec4 skyAmbientColor;      // rgb = sky (top) hemisphere ambient
-    vec4 groundAmbientColor;   // rgb = ground (bottom) hemisphere ambient
-    vec4 pointLightPos;        // xyz = world position, w = falloff radius
-    vec4 pointLightColor;      // rgb = tint * intensity
+    vec4 fogColorDensity;
+    vec4 furParams;        // x=time, y=furLength, z=furDensity, w=slopeThreshold
+    vec4 furGravity;       // x=gravity
+    vec4 sunDirection;
+    vec4 sunColor;
+    vec4 skyAmbientColor;
+    vec4 groundAmbientColor;
+    vec4 pointLightPos;
+    vec4 pointLightColor;
 } scene;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
-    uint furShellCount;        // 1 = обычный меш, >1 = Instanced fur
-    float emissive;            // 0 = normal lighting, > 0 = force color = pointLightColor * emissive
+    uint furShellCount;
+    float emissive;
 } push;
 
 void main() {
@@ -38,9 +39,6 @@ void main() {
     float slopeMask = smoothstep(scene.furParams.w, scene.furParams.w + 0.25, upFactor);
 
     // === Instanced fur ===
-    // Instance 0 -> furLayer = 0 (базовый непрозрачный меш, БЕЗ смещения и БЕЗ discard).
-    // Instance N-1 -> furLayer = 1 (верхний слой меха).
-    // При furShellCount == 1 весь объект — базовый меш.
     float furLayer = 0.0;
     if (push.furShellCount > 1u) {
         furLayer = float(gl_InstanceIndex) / (float(push.furShellCount) - 1.0);
@@ -48,11 +46,21 @@ void main() {
 
     vec3 displacedPos = inPosition;
     if (furLayer > 0.001) {
-        displacedPos += normalize(inNormal) * (furLayer * scene.furParams.y * slopeMask);
-        float wind = sin(scene.furParams.x * 2.5 + inPosition.x * 4.0 + inPosition.z * 3.0)
-                   * 0.02 * furLayer * furLayer * slopeMask;
-        displacedPos.x += wind;
-        displacedPos.z += wind * 0.5;
+        // Гравитация тянет кончики вниз
+        vec3 gravityVec = vec3(0.0, -1.0, 0.0) * scene.furGravity.x * furLayer;
+        
+        // Ветер колышет волосинки
+        vec3 windVec = vec3(
+            sin(scene.furParams.x * 2.5 + inPosition.x * 4.0 + inPosition.z * 3.0),
+            0.0,
+            cos(scene.furParams.x * 2.0 + inPosition.z * 4.0)
+        ) * 0.15 * furLayer;
+
+        // Смешиваем нормаль с гравитацией и ветром, нормализуем
+        vec3 bentDir = normalize(normalize(inNormal) + gravityVec + windVec);
+        
+        // Выталкиваем вершину вдоль изогнутого направления
+        displacedPos = inPosition + bentDir * (furLayer * scene.furParams.y * slopeMask);
     }
 
     vec4 worldPos = push.model * vec4(displacedPos, 1.0);
