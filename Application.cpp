@@ -10,7 +10,10 @@
 
 #include <cmath>
 #include <cstring>
+#include <fstream>
+#include <map>
 #include <stdexcept>
+#include <string>
 
 static const uint32_t WIDTH = 800;
 static const uint32_t HEIGHT = 600;
@@ -32,6 +35,7 @@ void Application::run() {
 }
 
 void Application::initVulkan() {
+    loadSettings();
     m_context.init(m_window);
     m_settings.selectedGpuIndex = static_cast<int>(m_context.getCurrentGpuIndex());
 
@@ -58,13 +62,13 @@ void Application::initVulkan() {
 
 void Application::initScene() {
     m_sceneObjects = {
-        {{ 0.0f, -1.00f,  0.0f}, {1.0f, 1.0f, 1.0f},   false, true,  true  }, // Idol
-        {{-3.0f, -1.00f, -3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  }, // Columns
+        {{ 0.0f, -1.00f,  0.0f}, {1.0f, 1.0f, 1.0f},   false, true,  true  },
+        {{-3.0f, -1.00f, -3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
         {{ 3.0f, -1.00f, -3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
         {{-3.0f, -1.00f,  3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
         {{ 3.0f, -1.00f,  3.0f}, {0.5f, 2.0f, 0.5f},   false, false, true  },
-        {{ 0.0f, -1.05f,  0.0f}, {20.0f, 0.05f, 20.0f}, false, false, false }, // Ground
-        {{ 3.5f, 0.5f, 0.0f},    {0.2f, 0.2f, 0.2f},   false, false, false }  // Fire
+        {{ 0.0f, -1.05f,  0.0f}, {20.0f, 0.05f, 20.0f}, false, false, false },
+        {{ 3.5f, 0.5f, 0.0f},    {0.2f, 0.2f, 0.2f},   false, false, false }
     };
 }
 
@@ -95,6 +99,91 @@ void Application::cleanup() {
     }
     m_context.cleanup();
     m_window.cleanup();
+}
+
+// ============================================================
+//  SETTINGS LOAD / SAVE
+// ============================================================
+void Application::loadSettings() {
+    std::ifstream file("settings.ini");
+    if (!file.is_open()) return;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+        auto pos = line.find('=');
+        if (pos == std::string::npos) continue;
+        std::string key = line.substr(0, pos);
+        std::string val = line.substr(pos + 1);
+        try {
+            if (key == "gpu_index") m_settings.selectedGpuIndex = std::stoi(val);
+            else if (key == "render_width") m_settings.renderWidth = std::stoul(val);
+            else if (key == "render_height") m_settings.renderHeight = std::stoul(val);
+            else if (key == "camera_fov") m_settings.cameraFov = std::stof(val);
+            else if (key == "camera_speed") m_settings.cameraSpeed = std::stof(val);
+            else if (key == "fog_enabled") m_settings.fogEnabled = std::stoi(val) != 0;
+            else if (key == "fog_density") m_settings.fogDensity = std::stof(val);
+            else if (key == "bloom_threshold") m_settings.ppParams.bloomThreshold = std::stof(val);
+            else if (key == "bloom_intensity") m_settings.ppParams.bloomIntensity = std::stof(val);
+            else if (key == "saturation") m_settings.ppParams.saturation = std::stof(val);
+            else if (key == "dither_strength") m_settings.ppParams.ditherStrength = std::stof(val);
+            else if (key == "fur_enabled") m_settings.furEnabled = std::stoi(val) != 0;
+            else if (key == "fur_shells") m_settings.shellCount = std::stoi(val);
+            else if (key == "fur_length") m_settings.furLength = std::stof(val);
+            else if (key == "fur_density") m_settings.furDensity = std::stof(val);
+            else if (key == "fur_slope") m_settings.slopeThreshold = std::stof(val);
+            else if (key == "fur_gravity") m_settings.furGravity = std::stof(val);
+            else if (key == "sun_azimuth") m_settings.sunAzimuth = std::stof(val);
+            else if (key == "sun_elevation") m_settings.sunElevation = std::stof(val);
+            else if (key == "sun_intensity") m_settings.sunIntensity = std::stof(val);
+            else if (key == "animate_light") m_settings.animatePointLight = std::stoi(val) != 0;
+            else if (key == "light_intensity") m_settings.pointLightIntensity = std::stof(val);
+            else if (key == "light_radius") m_settings.pointLightRadius = std::stof(val);
+        }
+        catch (...) { /* ignore bad values */ }
+    }
+}
+
+void Application::saveSettings() {
+    std::map<std::string, std::string> data;
+    std::ifstream fin("settings.ini");
+    std::string line;
+    while (std::getline(fin, line)) {
+        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+        auto pos = line.find('=');
+        if (pos != std::string::npos) {
+            data[line.substr(0, pos)] = line.substr(pos + 1);
+        }
+    }
+    fin.close();
+
+    data["gpu_index"] = std::to_string(m_settings.selectedGpuIndex);
+    data["render_width"] = std::to_string(m_settings.renderWidth);
+    data["render_height"] = std::to_string(m_settings.renderHeight);
+    data["camera_fov"] = std::to_string(m_settings.cameraFov);
+    data["camera_speed"] = std::to_string(m_settings.cameraSpeed);
+    data["fog_enabled"] = std::to_string(m_settings.fogEnabled ? 1 : 0);
+    data["fog_density"] = std::to_string(m_settings.fogDensity);
+    data["bloom_threshold"] = std::to_string(m_settings.ppParams.bloomThreshold);
+    data["bloom_intensity"] = std::to_string(m_settings.ppParams.bloomIntensity);
+    data["saturation"] = std::to_string(m_settings.ppParams.saturation);
+    data["dither_strength"] = std::to_string(m_settings.ppParams.ditherStrength);
+    data["fur_enabled"] = std::to_string(m_settings.furEnabled ? 1 : 0);
+    data["fur_shells"] = std::to_string(m_settings.shellCount);
+    data["fur_length"] = std::to_string(m_settings.furLength);
+    data["fur_density"] = std::to_string(m_settings.furDensity);
+    data["fur_slope"] = std::to_string(m_settings.slopeThreshold);
+    data["fur_gravity"] = std::to_string(m_settings.furGravity);
+    data["sun_azimuth"] = std::to_string(m_settings.sunAzimuth);
+    data["sun_elevation"] = std::to_string(m_settings.sunElevation);
+    data["sun_intensity"] = std::to_string(m_settings.sunIntensity);
+    data["animate_light"] = std::to_string(m_settings.animatePointLight ? 1 : 0);
+    data["light_intensity"] = std::to_string(m_settings.pointLightIntensity);
+    data["light_radius"] = std::to_string(m_settings.pointLightRadius);
+
+    std::ofstream fout("settings.ini");
+    for (auto& [k, v] : data) {
+        fout << k << "=" << v << "\n";
+    }
 }
 
 // ============================================================
@@ -172,7 +261,6 @@ void Application::updatePointLightAnimation(float time) {
         );
     }
 
-    // Синхронизируем позицию куба-огонька (последний объект в массиве)
     if (!m_sceneObjects.empty()) {
         m_sceneObjects.back().position = m_settings.pointLightPos;
     }
@@ -197,12 +285,30 @@ void Application::mainLoop() {
 
         GLFWwindow* window = m_window.getNativeWindow();
 
+        // --- Hotkeys ---
+        static bool f1Pressed = false;
         if (glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS) {
-            if (!m_f1Pressed) { m_f1Pressed = true; m_settings.showGui = !m_settings.showGui; }
+            if (!f1Pressed) { f1Pressed = true; m_settings.showMainSettings = !m_settings.showMainSettings; }
         }
-        else {
-            m_f1Pressed = false;
+        else f1Pressed = false;
+
+        static bool f2Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_F2) == GLFW_PRESS) {
+            if (!f2Pressed) { f2Pressed = true; m_settings.showStatsOverlay = !m_settings.showStatsOverlay; }
         }
+        else f2Pressed = false;
+
+        static bool f3Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_F3) == GLFW_PRESS) {
+            if (!f3Pressed) { f3Pressed = true; m_settings.showSceneWindow = !m_settings.showSceneWindow; }
+        }
+        else f3Pressed = false;
+
+        static bool f4Pressed = false;
+        if (glfwGetKey(window, GLFW_KEY_F4) == GLFW_PRESS) {
+            if (!f4Pressed) { f4Pressed = true; m_settings.showMainSettings = false; m_settings.showSceneWindow = false; }
+        }
+        else f4Pressed = false;
 
         static bool f11Pressed = false;
         if (glfwGetKey(window, GLFW_KEY_F11) == GLFW_PRESS) {
@@ -212,14 +318,26 @@ void Application::mainLoop() {
                 recreateSwapchain();
             }
         }
-        else {
-            f11Pressed = false;
+        else f11Pressed = false;
+
+        bool altPressed = glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+        static bool enterPressed = false;
+        if (altPressed && glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) {
+            if (!enterPressed) {
+                enterPressed = true;
+                m_window.setFullscreen(!m_window.isFullscreen());
+                recreateSwapchain();
+            }
         }
+        else enterPressed = false;
 
         m_gamepad.update();
 
-        if (m_settings.showGui) {
+        // --- Cursor logic ---
+        bool editorActive = m_settings.showMainSettings || m_settings.showSceneWindow;
+        if (editorActive) {
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            m_firstMouse = true;
         }
         else {
             if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
@@ -242,6 +360,7 @@ void Application::mainLoop() {
             }
         }
 
+        m_camera.setSpeed(m_settings.cameraSpeed);
         m_camera.processKeyboard(window, deltaTime);
         m_camera.processGamepad(m_gamepad.getLeftStick(), m_gamepad.getRightStick(),
             m_gamepad.getLeftTrigger(), m_gamepad.getRightTrigger(),
@@ -254,7 +373,7 @@ void Application::mainLoop() {
         ImGui::NewFrame();
 
         // --- Raycasting / Selection ---
-        if (m_settings.showGui && !ImGui::GetIO().WantCaptureMouse) {
+        if (editorActive && !ImGui::GetIO().WantCaptureMouse) {
             double xpos, ypos;
             glfwGetCursorPos(window, &xpos, &ypos);
             int w, h;
@@ -265,10 +384,10 @@ void Application::mainLoop() {
                 float yndc = (2.0f * static_cast<float>(ypos)) / h - 1.0f;
 
                 glm::mat4 view = m_camera.getViewMatrix();
-                glm::mat4 proj = glm::perspective(glm::radians(45.0f),
+                glm::mat4 proj = glm::perspective(glm::radians(m_settings.cameraFov),
                     m_offscreenRenderer.getRenderWidth() / static_cast<float>(m_offscreenRenderer.getRenderHeight()),
                     0.1f, 100.0f);
-                proj[1][1] *= -1; // Vulkan Y-down
+                proj[1][1] *= -1;
 
                 glm::vec4 rayClip(xndc, yndc, -1.0f, 1.0f);
                 glm::vec4 rayEye = glm::inverse(proj) * rayClip;
@@ -281,13 +400,12 @@ void Application::mainLoop() {
                 int hoveredIdx = -1;
 
                 for (size_t i = 0; i < m_sceneObjects.size(); ++i) {
-                    if (i == 5) continue; // Пропускаем землю, чтобы она не перекрывала объекты
+                    if (i == 5) continue; // Пропускаем землю
 
                     const auto& obj = m_sceneObjects[i];
                     glm::vec3 center = obj.position;
                     float radius = glm::length(obj.scale) * 0.5f;
 
-                    // Ray-Sphere intersection
                     glm::vec3 oc = rayOrigin - center;
                     float b = glm::dot(oc, rayDir);
                     float c = glm::dot(oc, oc) - radius * radius;
@@ -314,8 +432,8 @@ void Application::mainLoop() {
         }
 
         EditorActions actions;
-        if (m_settings.showGui) {
-            m_editorUI.render(m_settings, m_context, m_window,
+        if (m_settings.showMainSettings || m_settings.showSceneWindow || m_settings.showStatsOverlay) {
+            m_editorUI.render(m_settings, m_context, m_window, m_camera,
                 m_gamepad.isConnected(), m_sceneObjects, actions);
         }
 
@@ -327,6 +445,14 @@ void Application::mainLoop() {
         if (actions.requestRecreateOffscreen) {
             m_offscreenRenderer.recreateOffscreen(m_context,
                 m_settings.renderWidth, m_settings.renderHeight);
+        }
+        if (actions.saveSettings) {
+            saveSettings();
+        }
+        if (actions.resetSettings) {
+            m_settings = EngineSettings();
+            m_settings.showMainSettings = true; // keep window open
+            actions.requestRecreateOffscreen = true;
         }
 
         drawFrame(deltaTime);
@@ -363,14 +489,12 @@ void Application::drawFrame(float deltaTime) {
 
     VK_CHECK(vkResetFences(device, 1, &m_inFlightFences[m_currentFrame]));
 
-    // --- Camera matrices ---
     glm::mat4 view = m_camera.getViewMatrix();
-    glm::mat4 proj = glm::perspective(glm::radians(45.0f),
+    glm::mat4 proj = glm::perspective(glm::radians(m_settings.cameraFov),
         m_offscreenRenderer.getRenderWidth() / static_cast<float>(m_offscreenRenderer.getRenderHeight()),
         0.1f, 100.0f);
     proj[1][1] *= -1;
 
-    // --- Apply Selection / Hover Highlight ---
     std::vector<SceneObject> renderObjects = m_sceneObjects;
     for (size_t i = 0; i < renderObjects.size(); ++i) {
         if (static_cast<int>(i) == m_settings.hoveredObjectIndex) {
@@ -381,7 +505,6 @@ void Application::drawFrame(float deltaTime) {
         }
     }
 
-    // --- Record ---
     VK_CHECK(vkResetCommandBuffer(m_commandBuffers[m_currentFrame], 0));
     m_offscreenRenderer.recordCommandBuffer(
         m_commandBuffers[m_currentFrame],
@@ -389,7 +512,6 @@ void Application::drawFrame(float deltaTime) {
         renderObjects, m_settings, m_lastFrameTime,
         view, proj);
 
-    // --- Submit ---
     VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphores[m_currentFrame] };
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };

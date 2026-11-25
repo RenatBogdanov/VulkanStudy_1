@@ -62,8 +62,14 @@ struct SceneObject {
 //  ENGINE SETTINGS
 // ============================================================
 struct EngineSettings {
-    // --- UI ---
-    bool showGui = false;
+    // --- Editor UI ---
+    bool showMainSettings = false;
+    bool showStatsOverlay = true;
+    bool showSceneWindow = false;
+
+    // --- Camera ---
+    float cameraFov = 45.0f;
+    float cameraSpeed = 5.0f;
 
     // --- Selection ---
     int hoveredObjectIndex = -1;

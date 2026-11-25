@@ -3,6 +3,7 @@
 #include "Window.h"
 
 #include <fstream>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -304,9 +305,24 @@ int VulkanContext::readGpuPreferenceFromFile() const {
 }
 
 void VulkanContext::writeGpuPreferenceToFile(uint32_t index) const {
-    std::ofstream file(SETTINGS_FILE);
-    if (!file.is_open()) return;
-    file << "gpu_index=" << index << "\n";
+    std::map<std::string, std::string> data;
+    std::ifstream fin(SETTINGS_FILE);
+    std::string line;
+    while (std::getline(fin, line)) {
+        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+        auto pos = line.find('=');
+        if (pos != std::string::npos) {
+            data[line.substr(0, pos)] = line.substr(pos + 1);
+        }
+    }
+    fin.close();
+
+    data["gpu_index"] = std::to_string(index);
+
+    std::ofstream fout(SETTINGS_FILE);
+    for (auto& [k, v] : data) {
+        fout << k << "=" << v << "\n";
+    }
 }
 
 // ============================================================

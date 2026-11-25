@@ -78,3 +78,14 @@ void Camera::updateCameraVectors() {
     m_right = glm::normalize(glm::cross(m_front, m_worldUp));
     m_up = glm::normalize(glm::cross(m_right, m_front));
 }
+
+void Camera::setSpeed(float speed) {
+    m_speed = speed;
+}
+
+void Camera::reset() {
+    m_position = glm::vec3(0.0f, 0.0f, 3.0f);
+    m_yaw = -90.0f;
+    m_pitch = 0.0f;
+    updateCameraVectors();
+}

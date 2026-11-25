@@ -34,6 +34,9 @@ private:
     void drawFrame(float deltaTime);
     void cleanup();
 
+    void loadSettings();
+    void saveSettings();
+
     void createCommandPool();
     void createCommandBuffers();
     void createSyncObjects();
@@ -68,5 +71,4 @@ private:
     double   m_lastMouseX = 0.0;
     double   m_lastMouseY = 0.0;
     uint32_t m_currentFrame = 0;
-    bool     m_f1Pressed = false;
 };

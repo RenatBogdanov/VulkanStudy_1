@@ -8,10 +8,13 @@
 class VulkanContext;
 class Window;
 class Swapchain;
+class Camera;
 
 struct EditorActions {
     bool requestRecreateSwapchain = false;
     bool requestRecreateOffscreen = false;
+    bool saveSettings = false;
+    bool resetSettings = false;
 };
 
 class EditorUI {
@@ -26,6 +29,7 @@ public:
     void render(EngineSettings& settings,
         VulkanContext& context,
         Window& window,
+        Camera& camera,
         bool gamepadConnected,
         std::vector<SceneObject>& objects,
         EditorActions& actions);
