@@ -3,6 +3,7 @@
 #include "Window.h"
 #include "Swapchain.h"
 #include "Camera.h"
+#include "WormSwarmSystem.h" // <-- �����������: ������ ��� WormSwarmSystem ������
 
 #include <imgui/imgui.h>
 #include <imgui/imgui_impl_glfw.h>
@@ -67,16 +68,21 @@ void EditorUI::init(VulkanContext& context, Window& window, Swapchain& swapchain
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo = pipelineRenderingInfo;
 
     ImGui_ImplVulkan_Init(&init_info);
+    m_isInitialized = true;
 }
 
 void EditorUI::cleanup(VkDevice device) {
+    if (!m_isInitialized) return;
+
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
+
     if (m_imguiDescriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(device, m_imguiDescriptorPool, nullptr);
         m_imguiDescriptorPool = VK_NULL_HANDLE;
     }
+    m_isInitialized = false;
 }
 
 // ============================================================
@@ -88,6 +94,7 @@ void EditorUI::render(EngineSettings& settings,
     Camera& camera,
     bool gamepadConnected,
     std::vector<SceneObject>& objects,
+    WormSwarmSystem& wormSwarm,
     EditorActions& actions) {
 
     (void)gamepadConnected;
@@ -106,7 +113,7 @@ void EditorUI::render(EngineSettings& settings,
 
     // ---- F1: Main Settings Window ----
     if (settings.showMainSettings) {
-        ImGui::SetNextWindowSize(ImVec2(450, 500), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(450, 550), ImGuiCond_FirstUseEver);
         ImGui::Begin("Settings", &settings.showMainSettings);
 
         if (ImGui::BeginTabBar("SettingsTabs")) {
@@ -194,6 +201,39 @@ void EditorUI::render(EngineSettings& settings,
                 ImGui::SliderFloat("Fur Gravity", &settings.furGravity, 0.0f, 2.0f);
                 ImGui::EndTabItem();
             }
+
+            // --- Worms Tab ---
+            if (ImGui::BeginTabItem("Worms")) {
+                ImGui::Checkbox("Enable Worm Swarm", &settings.wormsEnabled);
+                ImGui::SliderInt("Worm Count", &settings.wormCount, 0, 3000);
+                ImGui::SliderFloat("Speed", &settings.wormSpeed, 0.5f, 15.0f);
+                ImGui::SliderFloat("Separation Radius", &settings.wormSeparationRadius, 0.1f, 3.0f);
+                ImGui::SliderFloat("Wiggle Amplitude", &settings.wormWiggleAmplitude, 0.0f, 1.0f);
+
+                ImGui::Separator();
+                ImGui::TextDisabled("Boids / Surface");
+                WormTuning& tuning = wormSwarm.getTuning();
+                ImGui::SliderFloat("Seek (Target Pull)", &tuning.seek, 0.0f, 3.0f);
+                ImGui::SliderFloat("Separation", &tuning.separation, 0.0f, 8.0f);
+                ImGui::SliderFloat("Cohesion", &tuning.cohesion, 0.0f, 2.0f);
+                ImGui::SliderFloat("Wander", &tuning.wander, 0.0f, 4.0f);
+                ImGui::SliderFloat("Surface Stick", &tuning.surfaceStick, 0.0f, 1.0f);
+                ImGui::SliderFloat("Surface Offset", &tuning.surfaceOffset, -0.15f, 0.15f);
+                if (ImGui::Button("Reset Boids")) {
+                    tuning = WormTuning{};
+                }
+
+                ImGui::Separator();
+                // �����������: �������� ����� CPU-��������� ���� (DOD-������������� 5.8.2).
+                ImGui::Text("Swarm CPU: %.2f ms", wormSwarm.getLastUpdateMs());
+
+                ImGui::Separator();
+                if (ImGui::Button("Rebuild Surface Grid")) {
+                    actions.rebuildWormGrid = true;
+                }
+                ImGui::TextDisabled("Rebuild after moving static objects.");
+                ImGui::EndTabItem();
+            }
             ImGui::EndTabBar();
         }
 
@@ -209,18 +249,17 @@ void EditorUI::render(EngineSettings& settings,
     // ============================================================
     if (!settings.showSceneWindow) return;
 
-    // ---- Гизмо-хоткеи W / E / R ----
-    // Не срабатывают при полёте камеры (ПКМ), при вводе текста и при перетаскивании гизмо.
+    // ---- Hotkeys W / E / R ----
     const bool rmbPressed = glfwGetMouseButton(window.getNativeWindow(), GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
     if (!rmbPressed && !ImGui::GetIO().WantTextInput && !ImGuizmo::IsUsing()) {
-        if (ImGui::IsKeyPressed(ImGuiKey_W)) settings.gizmoOperation = 0; // Translate
-        if (ImGui::IsKeyPressed(ImGuiKey_E)) settings.gizmoOperation = 1; // Rotate
-        if (ImGui::IsKeyPressed(ImGuiKey_R)) settings.gizmoOperation = 2; // Scale
+        if (ImGui::IsKeyPressed(ImGuiKey_W)) settings.gizmoOperation = 0;
+        if (ImGui::IsKeyPressed(ImGuiKey_E)) settings.gizmoOperation = 1;
+        if (ImGui::IsKeyPressed(ImGuiKey_R)) settings.gizmoOperation = 2;
     }
 
-    // ---- Hierarchy (слева) ----
+    // ---- Hierarchy ----
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(290, 520), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320, 520), ImGuiCond_FirstUseEver);
     ImGui::Begin("Hierarchy", &settings.showSceneWindow);
 
     if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -235,6 +274,8 @@ void EditorUI::render(EngineSettings& settings,
     ImGui::SameLine();
     if (ImGui::Button("+ Pillar")) actions.addPillar = true;
     ImGui::SameLine();
+    if (ImGui::Button("+ Waterfall")) actions.addWaterfall = true;
+
     if (ImGui::Button("Save Scene")) actions.saveScene = true;
     ImGui::SameLine();
     if (ImGui::Button("Load Scene")) actions.loadScene = true;
@@ -266,7 +307,7 @@ void EditorUI::render(EngineSettings& settings,
 
     ImGui::End();
 
-    // ---- Inspector (справа) ----
+    // ---- Inspector ----
     if (!hasSelection) return;
 
     SceneObject& obj = objects[settings.selectedObjectIndex];
@@ -275,7 +316,6 @@ void EditorUI::render(EngineSettings& settings,
     ImGui::SetNextWindowSize(ImVec2(310, 460), ImGuiCond_FirstUseEver);
     ImGui::Begin("Inspector");
 
-    // Zero-init + string::copy: без C4996 и без риска переполнения.
     char nameBuf[256] = {};
     obj.name.copy(nameBuf, sizeof(nameBuf) - 1);
     if (ImGui::InputText("Name", nameBuf, sizeof(nameBuf)))
@@ -293,6 +333,13 @@ void EditorUI::render(EngineSettings& settings,
     ImGui::Checkbox("Rotate", &obj.isRotating);
     ImGui::SliderFloat("Emissive", &obj.emissive, 0.0f, 2.0f);
 
+    if (obj.isWaterfall) {
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Waterfall Settings");
+        ImGui::SliderFloat("Flow Speed", &obj.waterfallSpeed, 0.1f, 3.0f);
+        ImGui::SliderFloat("Foam Intensity", &obj.waterfallFoam, 0.1f, 2.0f);
+    }
+
     ImGui::Separator();
     const char* opNames[] = { "Translate", "Rotate", "Scale" };
     ImGui::Combo("Gizmo", &settings.gizmoOperation, opNames, IM_ARRAYSIZE(opNames));
@@ -309,17 +356,12 @@ void EditorUI::render(EngineSettings& settings,
     ImGuizmo::SetRect(0, 0, displaySize.x, displaySize.y);
 
     glm::mat4 view = camera.getViewMatrix();
-    // Чистая projection БЕЗ Y-flip — ImGuizmo ждёт OpenGL-style NDC и сам
-    // делает (1 - ndc.y)/2. Рендер-путь продолжает использовать Y-flipped proj.
     glm::mat4 proj = glm::perspective(glm::radians(settings.cameraFov),
         static_cast<float>(settings.renderWidth) / static_cast<float>(settings.renderHeight),
         0.1f, 100.0f);
 
     glm::mat4 model = obj.getModelMatrix();
 
-    // ВАЖНО: gizmoOperation — это ИНДЕКС (0/1/2) для Combo.
-    // ImGuizmo::OPERATION — битовые флаги (TRANSLATE=1, ROTATE=2, SCALE=4).
-    // Прямой static_cast даёт сдвиг на один: E → TRANSLATE, R → ROTATE, W → пусто.
     ImGuizmo::OPERATION op = ImGuizmo::TRANSLATE;
     switch (settings.gizmoOperation) {
     case 1:  op = ImGuizmo::ROTATE; break;

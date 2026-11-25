@@ -28,7 +28,6 @@ void Camera::processKeyboard(GLFWwindow* window, float deltaTime) {
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         m_position += m_right * velocity;
 
-    // Вверх (Space / E), Вниз (Left Shift / Q)
     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
         m_position += m_worldUp * velocity;
     if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
@@ -39,7 +38,6 @@ void Camera::processMouseMovement(float xOffset, float yOffset) {
     m_yaw += xOffset * m_sensitivity;
     m_pitch += yOffset * m_sensitivity;
 
-    // Ограничиваем угол обзора, чтобы избежать переворота камеры
     if (m_pitch > 89.0f) m_pitch = 89.0f;
     if (m_pitch < -89.0f) m_pitch = -89.0f;
 
@@ -49,19 +47,14 @@ void Camera::processMouseMovement(float xOffset, float yOffset) {
 void Camera::processGamepad(const glm::vec2& leftStick, const glm::vec2& rightStick, float leftTrigger, float rightTrigger, float deltaTime) {
     float velocity = m_speed * deltaTime;
 
-    // Движение (левый стик)
     m_position += m_front * (leftStick.y * velocity);
     m_position += m_right * (leftStick.x * velocity);
-
-    // Подъем/спуск (курки)
     m_position += m_worldUp * ((rightTrigger - leftTrigger) * velocity);
 
-    // Вращение (правый стик)
     float rotSpeed = 120.0f * deltaTime;
     m_yaw += rightStick.x * rotSpeed;
     m_pitch += rightStick.y * rotSpeed;
 
-    // Ограничиваем угол обзора
     if (m_pitch > 89.0f) m_pitch = 89.0f;
     if (m_pitch < -89.0f) m_pitch = -89.0f;
 

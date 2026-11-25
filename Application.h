@@ -10,6 +10,7 @@
 #include "Texture.h"
 #include "VulkanContext.h"
 #include "Window.h"
+#include "WormSwarmSystem.h"  // <-- днаюбкемн
 
 #include <vulkan/vulkan.h>
 #include <vma/vk_mem_alloc.h>
@@ -50,6 +51,7 @@ private:
     void waitForFramebuffer();
 
     void updatePointLightAnimation(float time);
+    void handleEditorActions(const EditorActions& actions);
 
     void handleEditorActions(const EditorActions& actions);
 
@@ -58,11 +60,16 @@ private:
     Swapchain         m_swapchain;
     Camera            m_camera;
     Gamepad           m_gamepad;
+
     Mesh              m_idolMesh;
     Mesh              m_cubeMesh;
+    Mesh              m_waterfallMesh;  // <-- днаюбкемн
+    Mesh              m_wormMesh;       // <-- днаюбкемн
     Texture           m_texture;
+
     OffscreenRenderer m_offscreenRenderer;
     EditorUI          m_editorUI;
+    WormSwarmSystem   m_wormSwarm;      // <-- днаюбкемн
 
     EngineSettings    m_settings;
     std::vector<SceneObject> m_sceneObjects;

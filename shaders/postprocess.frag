@@ -42,28 +42,27 @@ void main() {
     }
     color += bloom * params.bloomIntensity;
 
-    // Кинематографичная цветокоррекция (saturation + tint).
+    // Кинематографичная цветокоррекция (saturation + tint без высветления чёрного).
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
     color = mix(vec3(luma), color, params.saturation);
-    color = mix(color, vec3(1.0, 0.95, 0.85), luma * 0.2);
-    color = mix(color, vec3(0.85, 0.90, 1.0), (1.0 - luma) * 0.2);
+    color = mix(color, color * vec3(1.05, 0.98, 0.88), luma * 0.25);
+    color = mix(color, color * vec3(0.88, 0.93, 1.05), (1.0 - luma) * 0.25);
 
     // === Экспозиция + контраст: режем паразитную серую дымку в тенях ===
-    color = clamp((color - 0.04) * 1.25, 0.0, 1.0);
+    color = clamp((color - 0.03) * 1.2, 0.0, 1.0);
 
     // === Мягкий Reinhard-тонемаппинг: чистые блики, глубокий чёрный ===
     color = color / (1.0 + color * 0.25);
 
-    // === Финальный перевод в линейное пространство ===
-    // Swapchain имеет формат SRGB и САМ применит pow(1/2.2) при записи.
-    // Поэтому мы обязаны отдать линейный цвет, иначе получаем двойную
-    // гамма-коррекцию (тени и чёрный уходят в светло-серый).
-    color = pow(max(color, vec3(0.0)), vec3(2.2));
-
-    // Дизеринг
+    // Дизеринг (в 8-битном sRGB-пространстве до конвертации в linear)
     ivec2 pixelPos = ivec2(gl_FragCoord.xy) % 4;
     float dither = bayerMatrix[pixelPos.y * 4 + pixelPos.x] / 16.0 - 0.5;
-    color += dither * (1.0 / 255.0) * params.ditherStrength;
+    color = clamp(color + dither * (1.0 / 255.0) * params.ditherStrength, 0.0, 1.0);
+
+    // === Фикс двойной гамма-коррекции (0.1.8) ===
+    // Swapchain (VK_FORMAT_B8G8R8A8_SRGB) автоматически применяет гамму 1/2.2 при записи.
+    // Переводим итоговый цвет в линейное пространство, чтобы избежать двойного осветления.
+    color = pow(color, vec3(2.2));
 
     outColor = vec4(color, 1.0);
 }

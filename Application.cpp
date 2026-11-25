@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -30,7 +31,13 @@ void Application::run() {
         initVulkan();
         mainLoop();
     }
+    catch (const std::exception& e) {
+        std::cerr << "FATAL ERROR: " << e.what() << std::endl;
+        cleanup();
+        throw;
+    }
     catch (...) {
+        std::cerr << "FATAL UNKNOWN ERROR!" << std::endl;
         cleanup();
         throw;
     }
@@ -49,12 +56,15 @@ void Application::initVulkan() {
 
     m_cubeMesh.createProceduralCube(m_context, m_commandPool);
     m_idolMesh.loadFromObj(m_context, m_commandPool, "models/idol.obj");
+    m_waterfallMesh.createProceduralWaterfall(m_context, m_commandPool);
+    m_wormMesh.createProceduralWorm(m_context, m_commandPool); // НОВОЕ
     m_texture.init(m_context, m_commandPool, "textures/stone.png");
 
+    // Передаем 8 аргументов, включая &m_wormMesh
     m_offscreenRenderer.init(m_context,
         m_swapchain.getImageFormat(),
         m_commandPool,
-        &m_cubeMesh, &m_idolMesh, &m_texture,
+        &m_cubeMesh, &m_idolMesh, &m_waterfallMesh, &m_wormMesh, &m_texture,
         m_settings.renderWidth, m_settings.renderHeight);
 
     m_editorUI.init(m_context, m_window, m_swapchain);
@@ -67,22 +77,48 @@ void Application::initVulkan() {
     }
     else {
         initDefaultScene();
-        saveScene("scene.txt");   // создаём файл при первом запуске
+        saveScene("scene.txt");
     }
+
+    // Инициализация стаи червячков
+    m_wormSwarm.init(m_settings.wormCount, m_sceneObjects, &m_cubeMesh, &m_idolMesh);
 
     createSyncObjects();
 }
 
 void Application::initDefaultScene() {
-    m_sceneObjects = {
-        { "Idol",      { 0.0f, -1.00f,  0.0f}, {0,0,0}, {1.0f, 1.0f, 1.0f},   false, true,  true,  false, 0.0f },
-        { "Pillar 1",  {-3.0f, -1.00f, -3.0f}, {0,0,0}, {0.5f, 2.0f, 0.5f},   false, false, true,  false, 0.0f },
-        { "Pillar 2",  { 3.0f, -1.00f, -3.0f}, {0,0,0}, {0.5f, 2.0f, 0.5f},   false, false, true,  false, 0.0f },
-        { "Pillar 3",  {-3.0f, -1.00f,  3.0f}, {0,0,0}, {0.5f, 2.0f, 0.5f},   false, false, true,  false, 0.0f },
-        { "Pillar 4",  { 3.0f, -1.00f,  3.0f}, {0,0,0}, {0.5f, 2.0f, 0.5f},   false, false, true,  false, 0.0f },
-        { "Ground",    { 0.0f, -1.05f,  0.0f}, {0,0,0}, {20.0f, 0.05f, 20.0f},false, false, false, false, 0.0f },
-        { "Point Light",{ 3.5f, 0.5f,   0.0f}, {0,0,0}, {0.2f, 0.2f, 0.2f},  false, false, false, true,  0.0f }
-    };
+    // Исправлена ошибка C2679 (неверное количество аргументов для SceneObject)
+    SceneObject idol;
+    idol.name = "Idol";
+    idol.position = glm::vec3(0.0f, -1.0f, 0.0f);
+    idol.scale = glm::vec3(1.0f);
+    idol.useIdolMesh = true;
+    idol.isFurry = true;
+
+    SceneObject pillar1;
+    pillar1.name = "Pillar 1";
+    pillar1.position = glm::vec3(-3.0f, -1.0f, -3.0f);
+    pillar1.scale = glm::vec3(0.5f, 2.0f, 0.5f);
+    pillar1.isFurry = true;
+
+    SceneObject pillar2;
+    pillar2.name = "Pillar 2";
+    pillar2.position = glm::vec3(3.0f, -1.0f, -3.0f);
+    pillar2.scale = glm::vec3(0.5f, 2.0f, 0.5f);
+    pillar2.isFurry = true;
+
+    SceneObject ground;
+    ground.name = "Ground";
+    ground.position = glm::vec3(0.0f, -1.05f, 0.0f);
+    ground.scale = glm::vec3(20.0f, 0.05f, 20.0f);
+
+    SceneObject light;
+    light.name = "Point Light";
+    light.position = glm::vec3(3.5f, 0.5f, 0.0f);
+    light.scale = glm::vec3(0.2f);
+    light.isLightMarker = true;
+
+    m_sceneObjects = { idol, pillar1, pillar2, ground, light };
     m_settings.selectedObjectIndex = -1;
     m_settings.hoveredObjectIndex = -1;
 }
@@ -96,15 +132,15 @@ void Application::loadScene(const std::string& path) {
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
 
-        // Format: name|px py pz|rx ry rz|sx sy sz|idol furry rotating light|emissive
         std::istringstream ss(line);
-        std::string nameP, posP, rotP, sclP, flagsP, emissP;
+        std::string nameP, posP, rotP, sclP, flagsP, emissP, waterP;
         if (!std::getline(ss, nameP, '|')) continue;
         if (!std::getline(ss, posP, '|')) continue;
         if (!std::getline(ss, rotP, '|')) continue;
         if (!std::getline(ss, sclP, '|')) continue;
         if (!std::getline(ss, flagsP, '|')) continue;
         if (!std::getline(ss, emissP, '|')) continue;
+        std::getline(ss, waterP, '|');
 
         SceneObject obj;
         obj.name = nameP;
@@ -113,18 +149,23 @@ void Application::loadScene(const std::string& path) {
         std::istringstream(rotP) >> obj.rotation.x >> obj.rotation.y >> obj.rotation.z;
         std::istringstream(sclP) >> obj.scale.x >> obj.scale.y >> obj.scale.z;
 
-        int uI = 0, iF = 0, iR = 0, iL = 0;
-        std::istringstream(flagsP) >> uI >> iF >> iR >> iL;
+        int uI = 0, iF = 0, iR = 0, iL = 0, iW = 0;
+        std::istringstream(flagsP) >> uI >> iF >> iR >> iL >> iW;
         obj.useIdolMesh = (uI != 0);
         obj.isFurry = (iF != 0);
         obj.isRotating = (iR != 0);
         obj.isLightMarker = (iL != 0);
+        obj.isWaterfall = (iW != 0);
 
         std::istringstream(emissP) >> obj.emissive;
+
+        if (!waterP.empty()) {
+            std::istringstream(waterP) >> obj.waterfallSpeed >> obj.waterfallFoam;
+        }
+
         loaded.push_back(obj);
     }
 
-    // Гарантируем, что свет-маркер всегда ровно один и в конце
     std::vector<SceneObject> final;
     for (auto& obj : loaded)
         if (!obj.isLightMarker) final.push_back(obj);
@@ -145,7 +186,7 @@ void Application::saveScene(const std::string& path) const {
     std::ofstream file(path);
     if (!file.is_open()) return;
 
-    file << "# Scene: name|px py pz|rx ry rz|sx sy sz|idol furry rotating light|emissive\n";
+    file << "# Scene: name|px py pz|rx ry rz|sx sy sz|idol furry rotating light waterfall|emissive|waterspeed foam\n";
     for (const auto& obj : m_sceneObjects) {
         std::string n = obj.name;
         std::replace(n.begin(), n.end(), '|', '_');
@@ -158,8 +199,10 @@ void Application::saveScene(const std::string& path) const {
             << (obj.useIdolMesh ? 1 : 0) << " "
             << (obj.isFurry ? 1 : 0) << " "
             << (obj.isRotating ? 1 : 0) << " "
-            << (obj.isLightMarker ? 1 : 0) << "|"
-            << obj.emissive << "\n";
+            << (obj.isLightMarker ? 1 : 0) << " "
+            << (obj.isWaterfall ? 1 : 0) << "|"
+            << obj.emissive << "|"
+            << obj.waterfallSpeed << " " << obj.waterfallFoam << "\n";
     }
 }
 
@@ -169,8 +212,11 @@ void Application::cleanup() {
         vkDeviceWaitIdle(device);
         m_editorUI.cleanup(device);
         m_offscreenRenderer.cleanup(m_context);
+
         m_idolMesh.cleanup(m_context.getAllocator());
         m_cubeMesh.cleanup(m_context.getAllocator());
+        m_waterfallMesh.cleanup(m_context.getAllocator());
+        m_wormMesh.cleanup(m_context.getAllocator());
         m_texture.cleanup(device, m_context.getAllocator());
 
         for (VkSemaphore s : m_imageAvailableSemaphores) vkDestroySemaphore(device, s, nullptr);
@@ -225,6 +271,12 @@ void Application::loadSettings() {
             else if (key == "animate_light")    m_settings.animatePointLight = std::stoi(val) != 0;
             else if (key == "light_intensity")  m_settings.pointLightIntensity = std::stof(val);
             else if (key == "light_radius")     m_settings.pointLightRadius = std::stof(val);
+            // Worm Settings
+            else if (key == "worms_enabled")    m_settings.wormsEnabled = std::stoi(val) != 0;
+            else if (key == "worm_count")       m_settings.wormCount = std::stoi(val);
+            else if (key == "worm_speed")       m_settings.wormSpeed = std::stof(val);
+            else if (key == "worm_separation")  m_settings.wormSeparationRadius = std::stof(val);
+            else if (key == "worm_wiggle")      m_settings.wormWiggleAmplitude = std::stof(val);
         }
         catch (...) { /* ignore */ }
     }
@@ -265,6 +317,11 @@ void Application::saveSettings() {
     data["animate_light"] = std::to_string(m_settings.animatePointLight ? 1 : 0);
     data["light_intensity"] = std::to_string(m_settings.pointLightIntensity);
     data["light_radius"] = std::to_string(m_settings.pointLightRadius);
+    data["worms_enabled"] = std::to_string(m_settings.wormsEnabled ? 1 : 0);
+    data["worm_count"] = std::to_string(m_settings.wormCount);
+    data["worm_speed"] = std::to_string(m_settings.wormSpeed);
+    data["worm_separation"] = std::to_string(m_settings.wormSeparationRadius);
+    data["worm_wiggle"] = std::to_string(m_settings.wormWiggleAmplitude);
 
     std::ofstream fout("settings.ini");
     for (auto& [k, v] : data) fout << k << "=" << v << "\n";
@@ -357,7 +414,6 @@ static size_t findLightMarkerIndex(const std::vector<SceneObject>& v) {
 }
 
 void Application::handleEditorActions(const EditorActions& actions) {
-    // ---- Duplicate ----
     if (actions.duplicateObject) {
         int idx = m_settings.selectedObjectIndex;
         if (idx >= 0 && idx < (int)m_sceneObjects.size() && !m_sceneObjects[idx].isLightMarker) {
@@ -372,7 +428,6 @@ void Application::handleEditorActions(const EditorActions& actions) {
         }
     }
 
-    // ---- Delete ----
     if (actions.deleteObject) {
         int idx = m_settings.selectedObjectIndex;
         if (idx >= 0 && idx < (int)m_sceneObjects.size() && !m_sceneObjects[idx].isLightMarker) {
@@ -382,7 +437,6 @@ void Application::handleEditorActions(const EditorActions& actions) {
         }
     }
 
-    // ---- Add Idol ----
     if (actions.addIdol) {
         SceneObject obj;
         obj.name = "Idol " + std::to_string(m_sceneObjects.size());
@@ -396,7 +450,6 @@ void Application::handleEditorActions(const EditorActions& actions) {
         m_settings.selectedObjectIndex = (int)insertAt;
     }
 
-    // ---- Add Pillar ----
     if (actions.addPillar) {
         SceneObject obj;
         obj.name = "Pillar " + std::to_string(m_sceneObjects.size());
@@ -409,7 +462,35 @@ void Application::handleEditorActions(const EditorActions& actions) {
         m_settings.selectedObjectIndex = (int)insertAt;
     }
 
-    // ---- Save / Load ----
+    if (actions.addWaterfall) {
+        glm::vec3 forward = m_camera.getFront();
+        forward.y = 0.0f;
+        forward = glm::normalize(forward);
+        glm::vec3 spawnPos = m_camera.getPosition() + forward * 10.0f;
+        spawnPos.y = 0.0f;
+
+        SceneObject rock;
+        rock.name = "Cliff";
+        rock.position = spawnPos - glm::vec3(0.0f, 5.0f, 0.0f);
+        rock.scale = glm::vec3(6.0f, 10.0f, 4.0f);
+        rock.useIdolMesh = false;
+
+        const size_t insertAtRock = findLightMarkerIndex(m_sceneObjects);
+        m_sceneObjects.insert(m_sceneObjects.begin() + insertAtRock, rock);
+
+        SceneObject water;
+        water.name = "Waterfall";
+        water.position = spawnPos + glm::vec3(0.0f, 0.5f, 2.0f);
+        water.scale = glm::vec3(1.0f);
+        water.isWaterfall = true;
+        water.waterfallSpeed = 1.5f;
+        water.waterfallFoam = 1.5f;
+
+        const size_t insertAtWater = findLightMarkerIndex(m_sceneObjects);
+        m_sceneObjects.insert(m_sceneObjects.begin() + insertAtWater, water);
+        m_settings.selectedObjectIndex = (int)insertAtWater;
+    }
+
     if (actions.saveScene) saveScene("scene.txt");
     if (actions.loadScene) loadScene("scene.txt");
 }
@@ -433,7 +514,6 @@ void Application::mainLoop() {
 
         GLFWwindow* window = m_window.getNativeWindow();
 
-        // ---- Hotkeys F1-F4 ----
         static bool f1Pressed = false;
         if (glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS) {
             if (!f1Pressed) { f1Pressed = true; m_settings.showMainSettings = !m_settings.showMainSettings; }
@@ -462,7 +542,6 @@ void Application::mainLoop() {
         }
         else f4Pressed = false;
 
-        // ---- F11: fullscreen toggle (не прерывает drag гизмо) ----
         static bool f11Pressed = false;
         const bool f11Now = glfwGetKey(window, GLFW_KEY_F11) == GLFW_PRESS;
         if (f11Now && !f11Pressed && !ImGuizmo::IsUsing()) {
@@ -475,7 +554,6 @@ void Application::mainLoop() {
             f11Pressed = false;
         }
 
-        // ---- Alt+Enter: fullscreen toggle (не прерывает drag гизмо) ----
         const bool altPressed = glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
             glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
         static bool enterPressed = false;
@@ -495,7 +573,6 @@ void Application::mainLoop() {
         const bool editorActive = m_settings.showMainSettings || m_settings.showSceneWindow;
         const bool rightMouseDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
 
-        // ---- Cursor logic ----
         if (editorActive) {
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
             m_firstMouse = true;
@@ -521,7 +598,6 @@ void Application::mainLoop() {
             }
         }
 
-        // Камера двигается WASD только вне редактора ИЛИ при зажатой ПКМ.
         m_camera.setSpeed(m_settings.cameraSpeed);
         if (!editorActive || rightMouseDown)
             m_camera.processKeyboard(window, deltaTime);
@@ -531,12 +607,20 @@ void Application::mainLoop() {
 
         updatePointLightAnimation(m_lastFrameTime);
 
+        // Обновление червячков
+        if (m_settings.wormsEnabled) {
+            if (m_wormSwarm.getCount() != static_cast<uint32_t>(m_settings.wormCount)) {
+                m_wormSwarm.setCount(m_settings.wormCount);
+            }
+            m_wormSwarm.update(deltaTime, m_settings.pointLightPos, m_sceneObjects, m_settings);
+            m_offscreenRenderer.updateWormInstances(m_context, m_wormSwarm.getInstances());
+        }
+
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         ImGuizmo::BeginFrame();
 
-        // ---- Raycasting / Selection (блокируется гизмо) ----
         if (editorActive && !ImGui::GetIO().WantCaptureMouse
             && !ImGuizmo::IsOver() && !ImGuizmo::IsUsing()) {
             double xpos, ypos;
@@ -552,7 +636,7 @@ void Application::mainLoop() {
                 glm::mat4 proj = glm::perspective(glm::radians(m_settings.cameraFov),
                     m_offscreenRenderer.getRenderWidth() / static_cast<float>(m_offscreenRenderer.getRenderHeight()),
                     0.1f, 100.0f);
-                proj[1][1] *= -1;   // Vulkan Y-flip для рэйкаста
+                proj[1][1] *= -1;
 
                 glm::vec4 rayClip(xndc, yndc, -1.0f, 1.0f);
                 glm::vec4 rayEye = glm::inverse(proj) * rayClip;
@@ -595,16 +679,18 @@ void Application::mainLoop() {
             m_settings.hoveredObjectIndex = -1;
         }
 
-        // ---- Editor UI ----
         EditorActions actions;
         if (m_settings.showMainSettings || m_settings.showSceneWindow || m_settings.showStatsOverlay) {
-            m_editorUI.render(m_settings, m_context, m_window, m_camera,
-                m_gamepad.isConnected(), m_sceneObjects, actions);
+            m_editorUI.render(m_settings, m_context, m_window, m_camera, m_gamepad.isConnected(), m_sceneObjects, m_wormSwarm, actions);
+        }
+
+        // Обработка кнопки пересборки сетки из UI
+        if (actions.rebuildWormGrid) {
+            m_wormSwarm.rebuildSurfaceGrid(m_sceneObjects, &m_cubeMesh, &m_idolMesh);
         }
 
         ImGui::Render();
 
-        // ---- Post-UI actions ----
         if (actions.requestRecreateSwapchain) recreateSwapchain();
         if (actions.requestRecreateOffscreen)
             m_offscreenRenderer.recreateOffscreen(m_context, m_settings.renderWidth, m_settings.renderHeight);
@@ -626,7 +712,6 @@ void Application::mainLoop() {
 // ============================================================
 void Application::drawFrame(float deltaTime) {
     (void)deltaTime;
-
     if (framebufferIsZero()) return;
 
     VkDevice device = m_context.getDevice();
@@ -649,13 +734,8 @@ void Application::drawFrame(float deltaTime) {
     glm::mat4 proj = glm::perspective(glm::radians(m_settings.cameraFov),
         m_offscreenRenderer.getRenderWidth() / static_cast<float>(m_offscreenRenderer.getRenderHeight()),
         0.1f, 100.0f);
-    proj[1][1] *= -1;   // Vulkan
+    proj[1][1] *= -1;
 
-    // Копия для рендера: подсветка emissive применяется на копию,
-    // оригинальные объекты сцены не мутируются.
-    // NOTE: анимация isRotating (time * 45°) выполняется внутри
-    //       OffscreenRenderer::recordCommandBuffer, а не здесь — иначе
-    //       += deltaTime на каждой пересозданной копии давал бы ~0.75° вместо накопления.
     std::vector<SceneObject> renderObjects = m_sceneObjects;
     for (size_t i = 0; i < renderObjects.size(); ++i) {
         if (static_cast<int>(i) == m_settings.hoveredObjectIndex)
